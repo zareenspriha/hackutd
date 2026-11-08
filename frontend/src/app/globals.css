@@ -1,0 +1,84 @@
+@import "tailwindcss";
+@import "@fontsource/outfit/300.css";
+@import "@fontsource/outfit/400.css";
+@import "@fontsource/outfit/500.css";
+@import "@fontsource/outfit/600.css";
+
+/* looma palette */
+@theme {
+  --color-midnight: #1c2e4a;
+  --color-dusty: #52677d;
+  --color-ivory: #bdc4d4;
+  --color-navy: #0f1a2b;
+  --color-butter: #d1cfc9;
+  /* derived tones */
+  --color-cream: #e6e4df;
+  --color-cream-2: #f2f1ee;
+  --color-dusty-deep: #3f5266;
+  --color-raised: #24395a;
+  /* status (always paired with an icon and a label) */
+  --color-sage: #6e9277;
+  --color-amber: #c99a4a;
+  --color-clay: #b5574b;
+  --color-slate: #8a93a3;
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-butter);
+  color: var(--color-navy);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+@utility glass {
+  @apply rounded-[28px] border border-white/40 bg-white/30 shadow-[0_20px_50px_-24px_rgba(15,26,43,0.35)] backdrop-blur-xl;
+}
+@utility pill {
+  @apply inline-flex items-center justify-center gap-2 rounded-full px-7 py-3.5 text-[15px] font-medium transition active:scale-[0.98];
+}
+@utility pill-dark {
+  @apply pill bg-midnight text-butter hover:bg-navy;
+}
+@utility pill-light {
+  @apply pill border border-midnight/20 bg-white/30 text-midnight hover:bg-white/50;
+}
+@utility eyebrow {
+  @apply text-xs font-medium uppercase tracking-[0.22em] text-dusty-deep;
+}
+@utility headline {
+  @apply font-light leading-[0.98] tracking-[-0.03em] text-midnight;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+input[type="range"] {
+  accent-color: var(--color-midnight);
+}
+
+.tnum { font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--color-midnight); outline-offset: 2px; border-radius: 12px; }
+.dark :focus-visible { outline-color: var(--color-ivory); }
+/* looma's cat: idle loops (SVG user-space origins) */
+.lm-tail, .lm-leg, .lm-head, .lm-ear, .lm-blink { transform-box: view-box; }
+.lm-tail { transform-origin: 46px 56px; animation: lm-sway 2.6s ease-in-out infinite; }
+.lm-leg { transform-origin: 42px 66px; animation: lm-kick 3.6s ease-in-out 2.4s infinite; }
+.lm-head { transform-origin: 190px 66px; animation: lm-tilt 4.2s ease-in-out 3s infinite; }
+.lm-ear { transform-origin: 202px 44px; animation: lm-twitch 3.2s ease-in-out 4s infinite; }
+.lm-blink { transform-origin: 194px 54px; animation: lm-blink 3.6s ease-in-out 2.6s infinite; }
+@keyframes lm-sway { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(10deg); } }
+@keyframes lm-kick { 0%, 70%, 100% { transform: rotate(0); } 80% { transform: rotate(-12deg); } 90% { transform: rotate(4deg); } }
+@keyframes lm-tilt { 0%, 60%, 100% { transform: rotate(0); } 75% { transform: rotate(-7deg); } }
+@keyframes lm-twitch { 0%, 82%, 100% { transform: rotate(0); } 86% { transform: rotate(16deg); } 90% { transform: rotate(0); } 93% { transform: rotate(10deg); } }
+@keyframes lm-blink { 0%, 90%, 100% { transform: scaleY(1); } 94% { transform: scaleY(0.1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
