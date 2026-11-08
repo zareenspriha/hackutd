@@ -10,10 +10,10 @@ from ..data.synthetic import garcia_purchases
 from ..engine.bridge import bridge_offer
 from ..engine.disaster import bill_view, label_spending, set_disaster_mode
 from ..engine.forecast import expected_payout
-from ..models import HelpTransfer, Scenario
+from ..models import CircleMember, HelpTransfer, Scenario
 from ..services.nessie import get_nessie
 from ..store import get_store
-from .deps import commit, load
+from .deps import commit, load, note
 
 log = logging.getLogger("looma.fund")
 router = APIRouter(prefix="/households/{household_id}", tags=["fund (Capital One)"])
@@ -49,6 +49,7 @@ async def disburse_bridge(household_id: str, body: DisburseIn | None = None):
     h.accounts.checking += amount
     h.bridge.amount = round(h.bridge.amount + amount if h.bridge.disbursed else amount, 2)
     h.bridge.disbursed = True
+    note(h, "You", "Took Bridge Funds into checking", amount, txn)
     await commit(h)
     return {**bridge_offer(h), "checking": h.accounts.checking, "nessie_transaction_id": txn}
 
@@ -60,6 +61,7 @@ class DisasterToggle(BaseModel):
 @router.post("/disaster-mode")
 async def disaster_mode(household_id: str, body: DisasterToggle):
     h = set_disaster_mode(await load(household_id), body.on)
+    note(h, "Your bank", "Disaster Mode on: late fees paused" if body.on else "Disaster Mode off")
     await commit(h)
     return {"disaster_mode": h.disaster_mode, "bills": bill_view(h)}
 
@@ -80,14 +82,18 @@ async def act_on_bill(household_id: str, bill_id: str, body: BillAction):
     b = next((b for b in h.bills if b.id == bill_id), None)
     if not b:
         raise HTTPException(404, "Bill not found")
+    if b.status != "pending":
+        raise HTTPException(409, f"{b.payee} is already {'paid' if b.status == 'paid' else 'moved'}")
     if body.action == "pay":
         if h.accounts.checking < b.amount:
             raise HTTPException(400, "Not enough in checking. Ask the coach where to find the money.")
-        await _mirror(get_nessie().withdraw, h.nessie_checking_id or "mock", b.amount, f"Paid {b.payee}")
+        txn = await _mirror(get_nessie().withdraw, h.nessie_checking_id or "mock", b.amount, f"Paid {b.payee}")
         h.accounts.checking -= b.amount
         b.status = "paid"
+        note(h, "You", f"Paid {b.payee}", -b.amount, txn)
     else:
         b.status = "moved"
+        note(h, "You", f"Moved {b.payee} until after the claim pays (no late fee in Disaster Mode)")
     await commit(h)
     return {"bills": bill_view(h), "checking": h.accounts.checking}
 
@@ -97,6 +103,7 @@ async def request_mortgage_pause(household_id: str):
     """Records that the family asked the lender for a disaster pause (simulated as approved for one month)."""
     h = await load(household_id)
     h.mortgage_pause_requested = True
+    note(h, "You", "Asked your lender for a one-month mortgage pause")
     await commit(h)
     return {"mortgage_pause_requested": True, "bills": bill_view(h)}
 
@@ -121,15 +128,18 @@ async def spending(household_id: str):
 
 
 class HelpIn(BaseModel):
-    from_name: str
-    amount: float = Field(gt=0, le=10000)
-    note: str = ""
+    from_name: str = Field(min_length=1, max_length=60)
+    amount: float = Field(gt=0, le=5000)
+    note: str = Field("", max_length=200)
 
 
 @router.post("/help-circle")
 async def help_circle(household_id: str, body: HelpIn):
     """A relative sends money (Nessie P2P transfer)."""
     h = await load(household_id)
+    from_same = sum(t.amount for t in h.help_circle if t.from_name == body.from_name)
+    if from_same + body.amount > 5000:
+        raise HTTPException(400, "That's more than $5,000 from one person. Large gifts need a bank review first.")
     nessie = get_nessie()
     txn = None
     if not nessie.mock and h.nessie_checking_id:
@@ -142,15 +152,62 @@ async def help_circle(household_id: str, body: HelpIn):
     else:
         txn = await nessie.transfer("mock_sender", "mock_checking", body.amount, f"Help Circle from {body.from_name}")
     h.help_circle.append(HelpTransfer(**body.model_dump()))
+    note(h, body.from_name, "Sent help to your checking", body.amount, txn)
+    if not any(m.name == body.from_name for m in h.circle):
+        h.circle.append(CircleMember(name=body.from_name, relation="Family"))
     h.accounts.checking += body.amount
     await commit(h)
     return {"received": body.amount, "from": body.from_name, "checking": h.accounts.checking,
             "help_circle_total": sum(t.amount for t in h.help_circle), "nessie_transaction_id": txn}
 
 
+class InviteIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    relation: str = Field("Family", max_length=30)
+
+
+def _circle_view(h) -> dict:
+    sent = {}
+    for t in h.help_circle:
+        sent[t.from_name] = sent.get(t.from_name, 0) + t.amount
+    return {
+        "members": [{**m.model_dump(), "sent": round(sent.get(m.name, 0), 2)} for m in h.circle],
+        "total": round(sum(sent.values()), 2),
+    }
+
+
+@router.get("/circle")
+async def get_circle(household_id: str):
+    """The family's Help circle: who they can ask, and who has sent money."""
+    return _circle_view(await load(household_id))
+
+
+@router.post("/circle")
+async def add_to_circle(household_id: str, body: InviteIn):
+    """Add someone to the Help circle."""
+    h = await load(household_id)
+    if any(m.name.lower() == body.name.strip().lower() for m in h.circle):
+        raise HTTPException(409, f"{body.name} is already in your circle")
+    h.circle.append(CircleMember(name=body.name.strip(), relation=body.relation.strip() or "Family"))
+    note(h, "You", f"Added {body.name.strip()} to your Help circle")
+    await commit(h)
+    return _circle_view(h)
+
+
+@router.post("/circle/request")
+async def request_help(household_id: str):
+    """Share a request link with everyone in the circle (marks them as asked)."""
+    h = await load(household_id)
+    for m in h.circle:
+        m.invited = True
+    note(h, "You", f"Asked {len(h.circle)} people in your Help circle for help")
+    await commit(h)
+    return {**_circle_view(h), "link": f"https://looma.app/help/{h.id}"}
+
+
 @router.get("/cash-access")
 async def cash_access(household_id: str, km: float = 15, limit: int = 5):
-    """Nearest working ATMs (Nessie ATMs when connected, plus simulated outages in the flood zone)."""
+    """Nearest working ATMs (Nessie ATMs when connected, plus simulated outages in the disaster zone)."""
     h = await load(household_id)
     nessie = get_nessie()
     atms: list[dict] = []
@@ -182,12 +239,14 @@ async def insurance_payout(household_id: str, payout_pct: float = 1.0):
     amount = expected_payout(h, Scenario(payout_pct=payout_pct))
     nessie = get_nessie()
     acct = h.nessie_checking_id or "mock"
-    await _mirror(nessie.deposit, acct, amount, "Insurance claim payout")
+    txn = await _mirror(nessie.deposit, acct, amount, "Insurance claim payout")
+    note(h, "Your insurer", "Claim paid into checking", amount, txn)
     h.accounts.checking += amount
     repaid = 0.0
     if h.bridge.disbursed and not h.bridge.repaid:
         repaid = h.bridge.amount
-        await _mirror(nessie.withdraw, acct, repaid, "Bridge Funds repaid automatically")
+        rtx = await _mirror(nessie.withdraw, acct, repaid, "Bridge Funds repaid automatically")
+        note(h, "Your bank", "Bridge Funds repaid from the payout", -repaid, rtx)
         h.accounts.checking -= repaid
         h.bridge.repaid = True
     h.claim.paid = True

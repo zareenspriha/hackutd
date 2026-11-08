@@ -1,6 +1,6 @@
 """Pillar 3 (PNC): Recovery Coach, health indicators, Money Ladder, forecast, what-ifs, Next Steps."""
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..engine.forecast import run_forecast
 from ..engine.health import indicators
@@ -63,7 +63,7 @@ async def what_if(household_id: str, s: Scenario = Depends(scenario)):
 
 
 class Question(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=500)
 
 
 @router.post("/coach")

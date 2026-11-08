@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .engine.claim import claim_summary
 from .engine.next_steps import compute_next_steps
-from .routers import fund, insurer, navigate, prove
+from .routers import demo, family, fund, insurer, navigate, prove
 from .routers.deps import load
 from .seed import seed
 
@@ -31,6 +31,8 @@ app.include_router(prove.router)
 app.include_router(fund.router)
 app.include_router(navigate.router)
 app.include_router(insurer.router)
+app.include_router(demo.router)
+app.include_router(family.router)
 
 
 @app.get("/", tags=["meta"])
@@ -53,18 +55,15 @@ async def household_home(household_id: str):
     h = await load(household_id)
     c = claim_summary(h)
     return {
-        "id": h.id, "name": h.name, "disaster_mode": h.disaster_mode,
+        "id": h.id, "name": h.name, "disaster_mode": h.disaster_mode, "days_since_disaster": h.days_since_disaster,
         "claim_status": c["status_line"], "documented_pct": c["documented_pct"], "owed": c["owed"]["total"],
         "checking": h.accounts.checking, "savings": h.accounts.savings,
         "claim_filed": h.claim.filed, "expected_days_to_pay": h.claim.expected_days_to_pay,
         "deductible": h.deductible, "weekly_grocery_spend": h.weekly_grocery_spend,
         "help_circle": [t.model_dump() for t in h.help_circle], "mortgage_pause_requested": h.mortgage_pause_requested,
+        "circle": fund._circle_view(h)["members"], "paycheck_delay_days": h.paycheck_delay_days,
+        "check_in": h.check_in.model_dump() if h.check_in else None, "share_hardship": h.fragility_opt_in,
+        "assigned_to": h.assigned_to, "messages": [o.model_dump() for o in reversed(h.outreach)][:3],
         "lat": h.lat, "lng": h.lng,
         "bridge": h.bridge.model_dump(), "next_steps": compute_next_steps(h),
     }
-
-
-@app.post("/demo/reset", tags=["meta"])
-async def demo_reset():
-    """Reset everything to the starting demo state (run before each rehearsal)."""
-    return await seed(force=True)

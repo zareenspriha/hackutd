@@ -28,8 +28,8 @@ def compute_next_steps(h: Household, s: Scenario | None = None, fc: dict | None 
         before = {x.room for x in h.scans if x.phase == "before"}
         after = {x.room for x in h.scans if x.phase == "after"}
         for room in sorted(before - after):
-            steps.append(_step(f"rescan_{room}", 2, f"Record the {room} again",
-                               "It's still missing from your claim.", f"/scan?room={room}"))
+            steps.append(_step(f"rescan_{room}", 2, f"Scan the {room} after the disaster",
+                               "Your home record has something to compare it to.", f"/scan?room={room}"))
 
     # 3. Bridge Funds ready
     bridge = available_bridge(h)

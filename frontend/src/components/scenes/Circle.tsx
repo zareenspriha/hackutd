@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { ArrowRight, CheckCircle2, CircleDashed, Share2 } from "lucide-react";
+import { CheckCircle2, CircleDashed, Plus, Send, Share2 } from "lucide-react";
 import { useDemo } from "../demo";
 import { EASE, Rise, Stage, useNav } from "../ui";
 import { atms, circle } from "@/lib/demoData";
@@ -34,7 +34,7 @@ export default function Circle() {
   const [fc, setFc] = useState<LForecast | null>(null);
   useEffect(() => {
     if (!d) return;
-    live.forecast({ claimDelayDays: 42, missedWorkDays: s.paycheckDelayed ? 14 : 0 }).then(setFc);
+    live.forecast({ claimDelayDays: 42 }).then(setFc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d, s.paycheckDelayed]);
 
@@ -44,7 +44,36 @@ export default function Circle() {
     : forecast(6, 1, s.paycheckDelayed ? 2 : 0, s.bridgeTaken ? 2480 : 0).map((p) => ({ ...p, balance: p.balance + (s.sisterSent ? 200 : 0) }));
   const low = pts.reduce((m, p) => (p.balance < m.balance ? p : m), pts[0]);
   const atmList = d ? liveAtms(d) : atms;
-  const gifts = d ? d.home.help_circle : [];
+  // Live: the circle and what each person sent come from the backend. Mock: the demo list.
+  const members = d?.home.circle
+    ? d.home.circle
+    : circle.map((p) => ({ name: p.name, relation: p.rel[0]!.toUpperCase() + p.rel.slice(1), invited: false,
+        sent: p.rel === "sister" ? (s.sisterSent ? 200 : 0) : p.sent }));
+  const lastGift = d?.home.help_circle.at(-1);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newRel, setNewRel] = useState("Family");
+  const ini = (n: string) => n.split(" ").filter(Boolean).slice(0, 2).map((x) => x[0]!.toUpperCase()).join("");
+
+  async function share(amount: number) {
+    const link = d ? await live.requestHelp() : null;
+    try {
+      if (link) await navigator.clipboard?.writeText(`I could use help covering ${usd(amount)} until our claim pays: ${link}`);
+    } catch {
+      /* clipboard blocked: the toast still confirms */
+    }
+    toast(link ? "Request link copied. Your circle has been asked." : "Link copied. Share it with your circle.");
+  }
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    const n = newName.trim();
+    if (!n) return;
+    if (d && !(await live.addToCircle(n, newRel))) return toast(`${n} is already in your circle`);
+    toast(`${n} added to your circle`);
+    setNewName("");
+    setAdding(false);
+  }
   const gap = Math.max(0, Math.ceil(-low.balance / 50) * 50);
   const when = new Date(new Date("2026-11-08T12:00:00").getTime() + low.day * 86400000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
@@ -64,7 +93,7 @@ export default function Circle() {
               <>
                 <p className="text-xs uppercase tracking-[0.2em] text-ivory">Ask for help</p>
                 <p className="mt-2 text-[26px] font-light leading-snug">You may be {usd(gap)} short around {when} if the claim runs late.</p>
-                <button onClick={() => toast("Link copied. Share it with your circle.")} className="pill mt-4 bg-cream-2 text-midnight hover:bg-white">
+                <button onClick={() => share(gap)} className="pill mt-4 bg-cream-2 text-midnight hover:bg-white">
                   <Share2 className="h-4 w-4" strokeWidth={1.75} /> Share a request for {usd(gap)}
                 </button>
               </>
@@ -79,34 +108,41 @@ export default function Circle() {
           <Rise delay={0.18} className="mt-4 rounded-[20px] border border-navy/[0.08] bg-cream p-5">
             <p className="eyebrow">Your circle</p>
             <ul className="mt-3 space-y-3">
-              {circle.map((p) => {
-                const sent = d
-                  ? gifts.filter((g) => g.from_name === p.name).reduce((a, g) => a + g.amount, 0)
-                  : p.rel === "sister" ? (s.sisterSent ? 200 : 0) : p.sent;
-                return (
-                  <li key={p.name} className="flex items-center gap-3">
-                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-ivory text-sm font-semibold text-midnight">{p.initials}</span>
-                    <div className="flex-1">
-                      <p className="text-navy">{p.name}</p>
-                      <p className="text-sm text-dusty-deep">{p.rel}</p>
-                    </div>
-                    {sent ? (
-                      <span className="tnum flex items-center gap-1.5 text-sm text-navy"><CheckCircle2 className="h-4 w-4 text-sage" strokeWidth={1.75} /> Sent {usd(sent)}</span>
-                    ) : (
-                      <span className="text-sm text-dusty-deep">Not asked yet</span>
-                    )}
-                  </li>
-                );
-              })}
+              {members.map((p) => (
+                <li key={p.name} className="flex items-center gap-3">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-ivory text-sm font-semibold text-midnight">{ini(p.name)}</span>
+                  <div className="flex-1">
+                    <p className="text-navy">{p.name}</p>
+                    <p className="text-sm text-dusty-deep">{p.relation}</p>
+                  </div>
+                  {p.sent ? (
+                    <span className="tnum flex items-center gap-1.5 text-sm text-navy"><CheckCircle2 className="h-4 w-4 text-sage" strokeWidth={1.75} /> Sent {usd(p.sent)}</span>
+                  ) : p.invited ? (
+                    <span className="flex items-center gap-1.5 text-sm text-dusty-deep"><Send className="h-3.5 w-3.5" strokeWidth={1.75} /> Asked</span>
+                  ) : (
+                    <span className="text-sm text-dusty-deep">Not asked yet</span>
+                  )}
+                </li>
+              ))}
             </ul>
-            {!s.sisterSent && (
-              <button onClick={() => (set({ sisterSent: true }), toast("Your sister sent $200"))} className="mt-4 text-sm font-medium text-midnight underline underline-offset-4">
-                Simulate: Ana sends $200
+            {adding ? (
+              <form onSubmit={add} className="mt-4 flex gap-2">
+                <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name" aria-label="Name"
+                  className="h-11 min-w-0 flex-1 rounded-[12px] border border-navy/[0.12] bg-white/60 px-3 text-navy outline-none focus:border-midnight" />
+                <select value={newRel} onChange={(e) => setNewRel(e.target.value)} aria-label="Relationship"
+                  className="h-11 rounded-[12px] border border-navy/[0.12] bg-white/60 px-2 text-navy outline-none">
+                  {["Family", "Friend", "Neighbor", "Coworker"].map((r) => <option key={r}>{r}</option>)}
+                </select>
+                <button className="pill-dark h-11 px-4" disabled={!newName.trim()}>Add</button>
+              </form>
+            ) : (
+              <button onClick={() => setAdding(true)} className="mt-4 flex items-center gap-1.5 text-sm font-medium text-midnight underline underline-offset-4">
+                <Plus className="h-4 w-4" strokeWidth={1.75} /> Add someone
               </button>
             )}
-            {s.sisterSent && (
+            {(lastGift || (!d && s.sisterSent)) && (
               <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 rounded-[14px] bg-cream-2 px-4 py-2.5 text-sm text-dusty-deep">
-                $200 from Ana · Nov 8 · tagged as recovery help
+                {usd(lastGift?.amount ?? 200)} from {(lastGift?.from_name ?? "Ana").split(" ")[0]} · tagged as recovery help
               </motion.p>
             )}
           </Rise>
@@ -151,11 +187,6 @@ export default function Circle() {
               </li>
             ))}
           </ul>
-          <div className="mt-4 flex justify-end">
-            <button onClick={() => go("lantern")} className="pill-light">
-              See the responder side <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
         </motion.div>
       }
     />

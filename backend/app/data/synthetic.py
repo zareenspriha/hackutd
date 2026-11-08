@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import random
+from datetime import date, timedelta
 
 from ..engine.disaster import label_bills
 from ..engine.priority import score
 from ..engine.valuation import value_item
-from ..models import Accounts, Bill, Claim, Household, Item, LossItem, RoomScan
+from ..models import Accounts, Bill, CircleMember, Claim, Household, Item, LossItem, RoomScan
 
 GARCIA_ID = "garcia"
 NEIGHBOR_ID = "nguyen"
@@ -28,7 +29,8 @@ def _garcia_bills() -> list[Bill]:
 
 
 def _garcia_other_rooms() -> tuple[list[RoomScan], list[LossItem]]:
-    """Rooms the Garcias already scanned before and after the flood (the live demo adds the 'Office' table)."""
+    """Rooms the Garcias recorded as home records (every 6 months) and scanned after the disaster.
+    The live demo adds the Office."""
     rooms = {
         "Living room": [
             ("Sectional sofa", "furniture", 1400, 1800, 4, "destroyed"),
@@ -62,8 +64,12 @@ def _garcia_other_rooms() -> tuple[list[RoomScan], list[LossItem]]:
             it = value_item(Item(name=name, category=cat, room=room, value_low=lo, value_high=hi, age_years=age, frame_ts=2.0 + i * 4))
             before.append(it)
             after.append(it.model_copy(update={"condition": cond, "frame_ts": 2.5 + i * 4}))
-        scans.append(RoomScan(room=room, phase="before", items=before))
-        scans.append(RoomScan(room=room, phase="after", items=after))
+        today = date.today()
+        # two home records: one about 11 months ago (before a few newer purchases) and the latest about 5 months ago
+        older = [i for i in before if i.age_years >= 2] or before[:1]
+        scans.append(RoomScan(room=room, phase="before", items=older, taken_on=today - timedelta(days=335)))
+        scans.append(RoomScan(room=room, phase="before", items=before, taken_on=today - timedelta(days=152)))
+        scans.append(RoomScan(room=room, phase="after", items=after, taken_on=today - timedelta(days=4)))
         from ..engine.compare import compare_items
 
         for l in compare_items(before, after):
@@ -83,6 +89,8 @@ def garcia() -> Household:
         disaster_mode=True, days_since_disaster=5, days_since_last_activity=5, outreach_unanswered=True,
         post_disaster_spend={"food": 260, "lodging": 0},
         displaced_nightly_cost=89,
+        circle=[CircleMember(name="Ana Garcia", relation="Sister"), CircleMember(name="José Ramos", relation="Uncle"),
+                CircleMember(name="Lucía Morales", relation="Friend")],
     )
     return score(label_bills(h))
 
@@ -92,7 +100,7 @@ def neighbor() -> Household:
     g = garcia()
     h = g.model_copy(deep=True, update={
         "id": NEIGHBOR_ID, "name": "The Nguyens", "lat": GARCIA_LOC[0] + 0.0021, "lng": GARCIA_LOC[1] + 0.0017,
-        "monthly_income": 7800, "days_since_last_activity": 0, "outreach_unanswered": False,
+        "monthly_income": 7800, "days_since_last_activity": 0, "outreach_unanswered": False, "circle": [],
         "accounts": Accounts(checking=4200, savings=16500, cd=0, cd_matures_in_days=0, ira=52000,
                              credit_card_balance=400, credit_card_limit=10000, auto_loan_monthly=0, mortgage_monthly=1600),
     })
@@ -104,7 +112,7 @@ def synthetic_households(n: int, seed: int = 42) -> list[Household]:
     rng = random.Random(seed)
     out = []
     for i in range(n):
-        # cluster most households near the flood zone (southwest Dallas), the rest across the county
+        # cluster most households near the disaster zone (southwest Dallas), the rest across the county
         if rng.random() < 0.65:
             lat = rng.gauss(GARCIA_LOC[0], 0.05)
             lng = rng.gauss(GARCIA_LOC[1], 0.06)
@@ -148,11 +156,11 @@ def synthetic_atms(n: int = 120, seed: int = 7) -> list[dict]:
     for i in range(n):
         lat = rng.gauss(DALLAS[0] - 0.03, 0.09)
         lng = rng.gauss(DALLAS[1] - 0.03, 0.1)
-        near_flood = abs(lat - GARCIA_LOC[0]) < 0.012 and abs(lng - GARCIA_LOC[1]) < 0.012
+        near_zone = abs(lat - GARCIA_LOC[0]) < 0.012 and abs(lng - GARCIA_LOC[1]) < 0.012
         atms.append({
             "id": f"atm{i:03d}", "name": f"{rng.choice(banks)} ATM #{i + 1}",
             "lat": round(lat, 5), "lng": round(lng, 5),
-            "working": not near_flood and rng.random() > 0.08,  # simulated outages in the flood zone
+            "working": not near_zone and rng.random() > 0.08,  # simulated outages in the disaster zone
             "hours": rng.choice(["24 hours", "6am–11pm"]), "source": "synthetic",
         })
     # guarantee one working ATM a short drive from the Garcias for the demo

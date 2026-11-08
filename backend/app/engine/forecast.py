@@ -53,6 +53,7 @@ def run_forecast(h: Household, s: Scenario | None = None, extra_expense: float =
     runway = None
     min_before_payout, tight_day = balance, 0
 
+    held = 0.0  # paychecks earned but not yet paid
     for day in range(0, horizon + 1):
         events = []
         if day == 0 and extra_expense:
@@ -64,15 +65,21 @@ def run_forecast(h: Household, s: Scenario | None = None, extra_expense: float =
                 balance -= h.displaced_nightly_cost
                 if day % 7 == 0:
                     events.append({"label": "Hotel this week", "amount": -round(h.displaced_nightly_cost * 7, 2)})
-        if day >= FIRST_PAYCHECK_DAY and (day - FIRST_PAYCHECK_DAY) % PAYCHECK_EVERY == 0:
+        # A late paycheck (employer closed) holds every payday before first_pay, then pays them all at once.
+        first_pay = FIRST_PAYCHECK_DAY + h.paycheck_delay_days
+        is_payday = day >= FIRST_PAYCHECK_DAY and (day - FIRST_PAYCHECK_DAY) % PAYCHECK_EVERY == 0
+        if is_payday:
             window_start = day - PAYCHECK_EVERY
             missed = max(0, min(day, s.missed_work_days) - max(window_start, 0))
             pay = paycheck * (1 - missed / PAYCHECK_EVERY)
-            if pay > 0:
-                balance += pay
-                events.append({"label": "Paycheck", "amount": round(pay, 2)})
             if missed:
                 events.append({"label": f"Missed {missed} work day(s)", "amount": round(pay - paycheck, 2)})
+            held += pay
+        if held > 0 and day >= first_pay:
+            balance += held
+            late = h.paycheck_delay_days > 0 and day == first_pay
+            events.append({"label": "Paycheck (late)" if late else "Paycheck", "amount": round(held, 2)})
+            held = 0.0
         for (d, payee, amt, _kind) in bills:
             if d == day:
                 balance -= amt
@@ -99,7 +106,8 @@ def run_forecast(h: Household, s: Scenario | None = None, extra_expense: float =
         "horizon": horizon,
         "assumptions": [
             f"Insurance pays on day {pday}, {int(s.payout_pct * 100)}% of what's owed, minus your ${h.deductible:,.0f} deductible",
-            f"Paycheck of ${paycheck:,.0f} every 2 weeks" + (f", minus {s.missed_work_days} missed work days" if s.missed_work_days else ""),
+            f"Paycheck of ${paycheck:,.0f} every 2 weeks" + (f", minus {s.missed_work_days} missed work days" if s.missed_work_days else "")
+            + (f", next one {h.paycheck_delay_days} days late" if h.paycheck_delay_days else ""),
             f"Everyday essentials about ${h.weekly_essential_spend:,.0f} a week",
             "Bills repeat monthly on their due dates",
         ] + ([f"Hotel ${h.displaced_nightly_cost:,.0f} a night until the claim pays"] if h.displaced_nightly_cost else []),

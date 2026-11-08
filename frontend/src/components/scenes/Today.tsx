@@ -2,6 +2,9 @@
 import { motion } from "motion/react";
 import { ArrowRight, Check } from "lucide-react";
 import { LoomaSays } from "../Cat";
+import { Messages, SafetyCheck } from "../Trust";
+import { firstName, useAuth } from "@/lib/auth";
+import { useLive } from "@/lib/live";
 import { useDemo } from "../demo";
 import { PILLARS } from "../pillars";
 import { EASE, Rise, useNav } from "../ui";
@@ -12,6 +15,10 @@ import { EASE, Rise, useNav } from "../ui";
 export default function Today() {
   const { go } = useNav();
   const { s } = useDemo();
+  const { user } = useAuth();
+  const live = useLive();
+  const day = live.data?.home.days_since_disaster ?? 2;
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
 
   const status = {
     prove: s.claimFiled ? "done" : "now",
@@ -26,18 +33,23 @@ export default function Today() {
       : "You're set for now. Ask me anything before you spend.";
 
   return (
-    <div className="mx-auto flex min-h-full max-w-[1040px] flex-col justify-center px-10 pb-24 pt-12">
+    <div className="mx-auto flex min-h-full max-w-[1040px] flex-col justify-center px-10 pb-24 pt-10">
       <Rise>
-        <p className="eyebrow">Sunday, Nov 8 · Day 2 after the flood</p>
-        <h1 className="headline mt-4 text-[64px]">
-          Hi, Maria. <span className="text-dusty">We&apos;ll get through this in three steps.</span>
+        <p className="eyebrow">{today} · Day {day} after the disaster</p>
+        <h1 className="headline mt-4 text-[56px]">
+          Hi, {user ? firstName(user) : "there"}. <span className="text-dusty">We&apos;ll get through this in three steps.</span>
         </h1>
       </Rise>
       <div className="mt-6 max-w-xl">
         <LoomaSays delay={0.3}>{message}</LoomaSays>
       </div>
 
-      <div className="mt-10 grid grid-cols-3 gap-4">
+      <div className="mt-8 space-y-3">
+        <Messages />
+        <SafetyCheck />
+      </div>
+
+      <div className="mt-6 grid grid-cols-3 gap-4">
         {PILLARS.map((p, i) => {
           const st = status[p.key];
           const isNow = st === "now";

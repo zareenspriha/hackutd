@@ -17,10 +17,11 @@ export default function Wait() {
   const { go } = useNav();
   const [weeks, setWeeks] = useState(3);
   const [pays, setPays] = useState(100);
-  const [missed, setMissed] = useState(s.paycheckDelayed ? 2 : 0);
+  const live = useLive();
+  // Live: a late paycheck is already in the backend forecast, so the slider starts at 0.
+  const [missed, setMissed] = useState(s.paycheckDelayed && !live.data ? 2 : 0);
   const [pause, setPause] = useState(false);
   const bridge = 2480;
-  const live = useLive();
   const [fc, setFc] = useState<LForecast | null>(null);
   const [topStep, setTopStep] = useState<string | null>(null);
 

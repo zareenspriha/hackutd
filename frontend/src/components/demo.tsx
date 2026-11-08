@@ -8,7 +8,8 @@ import { sceneOf, useLive } from "@/lib/live";
 /**
  * Shared demo state: what has happened to the Garcias so far. Every scene reads it, so the story
  * stays consistent as you move through it. Shift+D opens the presenter panel.
- * TODO (backend): each control maps to POST /demo/{action}.
+ * With the backend running, each control changes the real household (POST /demo/...), so every screen
+ * and the responder map update together.
  */
 export type DemoState = {
   disasterMode: boolean;
@@ -68,6 +69,7 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
             receiptAdded: local.receiptAdded || d.claim.receipts.length > 0,
             sisterSent: d.home.help_circle.length > 0,
             mortgageCalled: d.home.mortgage_pause_requested,
+            paycheckDelayed: (d.home.paycheck_delay_days ?? 0) > 0,
           }
         : local,
     [d, local],
@@ -108,12 +110,41 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const actions = [
-    { icon: ScanLine, label: "Load before scan", run: () => (set({ scanPreset: "before" }), toast("Before scan loaded")) },
-    { icon: ScanLine, label: "Load after scan", run: () => (set({ scanPreset: "after" }), toast("After scan loaded")) },
-    { icon: CloudRain, label: "Trigger flood", run: () => (set({ disasterMode: true }), toast("Disaster Mode is on. Late fees are paused.")) },
+    {
+      icon: ScanLine, label: "Load home record",
+      run: async () => {
+        if (live.data && !(await live.demo.presetScan("before"))) return toast("Preset scans need the mock analyzer");
+        set({ scanPreset: "before" });
+        toast("Garage home record loaded");
+      },
+    },
+    {
+      icon: ScanLine, label: "Load after-disaster scan",
+      run: async () => {
+        if (live.data && !(await live.demo.presetScan("after"))) return toast("Load the home record first");
+        set({ scanPreset: "after" });
+        toast("After-disaster scan loaded. Check What changed.");
+      },
+    },
+    {
+      icon: CloudRain, label: "Trigger disaster",
+      run: async () => {
+        if (live.data) await live.demo.disaster();
+        else set({ disasterMode: true });
+        toast("Disaster Mode is on. Late fees are paused.");
+      },
+    },
     { icon: HandHeart, label: "Sister sends $200", run: () => (set({ sisterSent: true }), toast("Your sister sent $200")) },
-    { icon: Timer, label: "Delay paycheck", run: () => (set({ paycheckDelayed: true }), toast("Paycheck delayed two weeks")) },
-    { icon: RotateCcw, label: "Reset demo", run: () => (setS(initial), live.reset(), toast("Demo reset")) },
+    {
+      icon: Timer, label: s.paycheckDelayed ? "Paycheck back on time" : "Delay paycheck",
+      run: async () => {
+        const on = !s.paycheckDelayed;
+        if (live.data) await live.demo.delayPaycheck(on ? 14 : 0);
+        else set({ paycheckDelayed: on });
+        toast(on ? "Paycheck delayed two weeks" : "Paycheck back on time");
+      },
+    },
+    { icon: RotateCcw, label: "Reset demo", run: async () => (setS(initial), await live.reset(), toast("Demo reset")) },
   ];
 
   return (
@@ -140,8 +171,23 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
 
       {/* presenter panel */}
       <AnimatePresence>
+        {!panel && (
+          <motion.button
+            key="demo-tab"
+            initial={{ x: 40, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 40, opacity: 0 }}
+            onClick={() => setPanel(true)}
+            aria-label="Open demo controls"
+            title="Demo controls (Shift+D)"
+            className="fixed right-0 top-1/2 z-40 -translate-y-1/2 rounded-l-[14px] bg-navy px-2 py-4 text-[11px] font-medium uppercase tracking-[0.2em] text-ivory/80 shadow-lg transition hover:bg-midnight hover:text-cream-2 [writing-mode:vertical-rl]"
+          >
+            Demo
+          </motion.button>
+        )}
         {panel && (
           <motion.aside
+            key="demo-panel"
             initial={{ x: 380 }}
             animate={{ x: 0 }}
             exit={{ x: 380 }}
