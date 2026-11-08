@@ -6,6 +6,7 @@ import Logo from "./Logo";
 import Lantern from "./scenes/Lantern";
 import { DemoProvider } from "./demo";
 import { LiveProvider } from "@/lib/live";
+import { freshDemo } from "@/lib/auth";
 
 /**
  * Insurer staff portal at /responders. Families never see a link to it.
@@ -37,6 +38,7 @@ export default function ResponderPortal() {
     try {
       localStorage.setItem(KEY, email);
     } catch {}
+    freshDemo(); // every demo run starts at day one
     setStaff(email);
   };
   const signOut = () => {

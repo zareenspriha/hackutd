@@ -315,6 +315,18 @@ export default function Scan() {
             <span key={c} className={`absolute h-10 w-10 rounded-sm border-butter/70 ${c}`} />
           ))}
 
+          {/* always mounted, so the camera fallbacks and the preview's upload link can open it */}
+          <input
+            ref={fileInput}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) upload(f);
+            }}
+          />
           {(status === "preview" || status === "camera") && (
             <>
               <video ref={video} muted playsInline className={`absolute inset-0 h-full w-full object-cover ${mirror ? "-scale-x-100" : ""}`} />
@@ -351,6 +363,12 @@ export default function Scan() {
                     ? `${cams.find((c) => c.deviceId === camId)?.label.replace(/\s*\(.*\)$/, "") || "Camera"} · tap to start`
                     : "Walk slowly. Tap to finish."}
                 </span>
+                {status === "preview" && live.data && (
+                  <button onClick={() => (cancelCamera(), setStatus("idle"), fileInput.current?.click())}
+                    className="mt-1 flex items-center gap-1.5 rounded-full bg-navy/60 px-3 py-1 text-xs text-butter backdrop-blur hover:bg-navy/80">
+                    <Upload className="h-3.5 w-3.5" strokeWidth={1.75} /> Upload a video instead
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -415,17 +433,6 @@ export default function Scan() {
                   <button onClick={() => fileInput.current?.click()} className="flex items-center gap-2 rounded-full bg-butter/15 px-5 py-2.5 text-sm font-medium text-butter transition hover:bg-butter/25">
                     <Upload className="h-4 w-4" strokeWidth={1.75} /> Upload a video instead
                   </button>
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    accept="video/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      e.target.value = "";
-                      if (f) upload(f);
-                    }}
-                  />
                 </>
               )}
             </div>

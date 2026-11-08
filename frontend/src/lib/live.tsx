@@ -263,6 +263,13 @@ export function LiveProvider({ children, staffName = null }: { children: React.R
     }
   }, [staffName]);
 
+  // a fresh demo start (new sign-in) reloads everything
+  useEffect(() => {
+    const onFresh = () => void refresh();
+    window.addEventListener("looma:fresh", onFresh);
+    return () => window.removeEventListener("looma:fresh", onFresh);
+  }, [refresh]);
+
   useEffect(() => {
     refresh();
   }, [refresh]);

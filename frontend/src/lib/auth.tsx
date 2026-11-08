@@ -38,17 +38,13 @@ const write = (u: User | null) => {
   }
 };
 
-/** Demo: every account opens the shared Garcia household, so a different account starts with a fresh conversation. */
-const LAST = "looma.lastEmail";
-function freshStartFor(email: string) {
-  try {
-    const key = email.trim().toLowerCase();
-    if (localStorage.getItem(LAST) === key) return;
-    localStorage.setItem(LAST, key);
-  } catch {
-    /* storage blocked: skip */
-  }
-  if (API) fetch(`${API}/households/${HOUSEHOLD}/messages`, { method: "DELETE" }).catch(() => {});
+/** Demo: every sign-in (family or responder) starts the whole demo over, so each new person sees day one:
+ * no claim, no Bridge Funds, no card, no help request, no messages. Open screens reload when it's done. */
+export function freshDemo() {
+  if (!API) return;
+  fetch(`${API}/demo/fresh`, { method: "POST" })
+    .then(() => window.dispatchEvent(new Event("looma:fresh")))
+    .catch(() => {});
 }
 
 export const firstName = (u: User) => u.name.split(" ")[0] || "there";
@@ -77,8 +73,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value: Auth = {
     user,
     ready,
-    signUp: (name, email) => (freshStartFor(email), save({ name: name.trim(), email: email.trim(), household: "garcia", bankLinked: false })),
-    logIn: (email) => (freshStartFor(email), save(read()?.email === email.trim() ? read() : { name: "Maria Garcia", email: email.trim(), household: "garcia", bankLinked: true })),
+    signUp: (name, email) => (freshDemo(), save({ name: name.trim(), email: email.trim(), household: "garcia", bankLinked: false })),
+    logIn: (email) => (freshDemo(), save(read()?.email === email.trim() ? read() : { name: "Maria Garcia", email: email.trim(), household: "garcia", bankLinked: true })),
     linkBank: () => user && save({ ...user, bankLinked: true }),
     logOut: () => save(null),
   };
