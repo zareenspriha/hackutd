@@ -18,7 +18,7 @@ const menus: Menu[] = [
   {
     key: "prove", label: "Prove it", Art: ArtScan,
     items: [
-      { t: "Scan a room", d: "Walk a room once. looma lists everything you own." },
+      { t: "Record your home", d: "Scan each room every six months. looma lists everything you own." },
       { t: "What changed", d: "Before and after, item by item, with proof attached." },
       { t: "Your claim", d: "Every dollar you're owed, documented." },
     ],
@@ -288,7 +288,7 @@ function StepVisual({ k }: { k: string }) {
                 </>
               )}
             </div>
-            <p className="mt-1.5 text-xs text-ivory/70">{ph === "before" ? "Before" : "After the flood"}</p>
+            <p className="mt-1.5 text-xs text-ivory/70">{ph === "before" ? "Home record" : "After the disaster"}</p>
           </div>
         ))}
       </div>

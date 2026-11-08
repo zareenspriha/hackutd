@@ -23,9 +23,9 @@ async def demo_reset():
     return await seed(force=True)
 
 
-@router.post("/flood")
-async def flood():
-    """The storm hits: Disaster Mode on (late fees paused, bills relabeled)."""
+@router.post("/disaster")
+async def disaster():
+    """Disaster strikes: Disaster Mode on (late fees paused, bills relabeled)."""
     h = await load(DEMO)
     set_disaster_mode(h, True)
     await commit(h, activity=False)
@@ -52,12 +52,15 @@ async def preset_scan(phase: Literal["before", "after"], room: str = "Living roo
         raise HTTPException(400, f"Load the before scan for {room} first.")
     res, _ = await g.analyze_room("", room, phase)
     items = [value_item(Item(room=room, **gi.model_dump())) for gi in res.items]
-    h.scans = [s for s in h.scans if not (s.room == room and s.phase == phase)] + [
-        RoomScan(room=room, phase=phase, items=items, missing_areas=res.missing_areas)
-    ]
+    from datetime import date
+
+    from .prove import _with_scan
+
+    h.scans = _with_scan(h.scans, RoomScan(room=room, phase=phase, items=items, missing_areas=res.missing_areas,
+                                           taken_on=date.today()))
     losses = []
     if phase == "after":
-        before = next(s for s in h.scans if s.room == room and s.phase == "before")
+        before = h.latest_scan(room, "before")
         losses = compare_items(before.items, items)
         h.claim.losses = [l for l in h.claim.losses if l.room != room] + losses
     await commit(h)

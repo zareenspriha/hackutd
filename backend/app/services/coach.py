@@ -87,8 +87,14 @@ def parse_scenario(q: str, base: Scenario) -> tuple[Scenario, list[str]]:
     return base.model_copy(update=upd), notes
 
 
+SCAM_WORDS = ("scam", "upfront", "up front", "gift card", "wire", "speed up", "fee to", "contractor", "called me",
+              "texted me", "someone called", "someone texted", "fema called", "verify my account", "my password", "pin")
+
+
 def detect_intent(q: str) -> str:
     ql = q.lower()
+    if any(w in ql for w in SCAM_WORDS):
+        return "scam"
     if any(w in ql for w in ("vacation", "trip", "travel", "holiday", "getaway")):
         return "vacation"
     if re.search(r"\bsell\b", ql):
@@ -107,6 +113,23 @@ def detect_intent(q: str) -> str:
     if any(w in ql for w in ("claim", "owed", "insurance")):
         return "claim"
     return "next"
+
+
+_MONEY = re.compile(r"\$\s?([\d,]+(?:\.\d+)?)")
+
+
+def _amounts(text: str) -> set[int]:
+    return {int(round(float(m.replace(",", "")))) for m in _MONEY.findall(text or "")}
+
+
+def _numbers_ok(wording: str, draft: str, facts: dict) -> bool:
+    """True when the AI's wording invents no dollar amounts (each is in the draft or within $1 of a fact)."""
+    import json as _json
+
+    allowed = _amounts(draft)
+    nums = re.findall(r"-?\d+(?:\.\d+)?", _json.dumps(facts, default=str))
+    allowed |= {int(round(abs(float(n)))) for n in nums}
+    return all(any(abs(a - b) <= 1 for b in allowed) for a in _amounts(wording))
 
 
 def _date(day: int) -> str:
@@ -240,6 +263,14 @@ async def ask(h: Household, question: str, s: Scenario | None = None) -> dict:
                 + ". Keep the credit card for essentials, and protect your CD and IRA.")
         card = {"kind": "ladder", "rows": [{"label": r["name"], "amount": f"${r['available']:,.0f}" if r["action"] != "protect" else "protected",
                                             "use": r["action"] == "use"} for r in ladder]}
+    elif intent == "scam":
+        facts = {"rules": ["Real responders never ask for a fee to speed up a claim",
+                           "Never pay with gift cards, wire transfers or crypto",
+                           "Never share your password, PIN or one-time codes",
+                           "Pay contractors only after work starts, and never more than a third up front"]}
+        text = ("Be careful: that has the signs of a disaster scam. No one from your insurer or bank will ask for a fee, "
+                "a gift card, a wire or your PIN. Don't pay or share anything. Message your adjuster in looma to check.")
+        card = {"kind": "safety", "rows": facts["rules"]}
     elif intent == "bills":
         pending = [b for b in h.bills if b.status == "pending" and b.due_in_days <= fc["payout_day"]]
         facts = {"bills": [b.model_dump() for b in pending]}
@@ -256,10 +287,17 @@ async def ask(h: Household, question: str, s: Scenario | None = None) -> dict:
     wording = await get_gemini().write(
         "Answer the family's question: " + question, {"draft_answer": text, "facts": facts}, fallback=text
     )
+    # Number guard: every dollar amount in the AI's wording must already be in our own math.
+    verified = _numbers_ok(wording, text, facts)
+    if not verified:
+        wording = text
     # the one next step is added by code after Gemini, so it can never be dropped or changed
+    if intent == "scam":
+        next_step = None  # a safety answer ends with the safety step, not a to-do
     if next_step and intent != "next":
         tail = f" Next step: {next_step['title']}."
         text += tail
         wording = wording.rstrip() + tail
-    return {"intent": intent, "answer": wording, "draft": text, "facts": facts, "card": card,
-            "assumptions": assumptions, "next_step": next_step, "next_steps": steps}
+    return {"intent": intent, "answer": wording, "draft": text, "facts": facts, "card": card, "numbers_checked": True,
+            "ai_wording_used": verified and wording != text,
+            "assumptions": [] if intent == "scam" else assumptions, "next_step": next_step, "next_steps": steps}

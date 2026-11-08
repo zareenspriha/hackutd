@@ -57,12 +57,28 @@ def silence_points(h: Household) -> tuple[float, list[str]]:
     return min(30.0, pts), reasons
 
 
+NEED_LABELS = {"shelter": "Shelter", "food": "Food", "cash": "Cash", "transport": "Transport",
+               "medical": "Medical care", "power": "Power or phone charging"}
+
+
+def need_points(h: Household) -> tuple[float, list[str]]:
+    """The family's own 'I need help' answer. Up, never down."""
+    ci = h.check_in
+    if not ci or (ci.safe and not ci.needs):
+        return 0.0, []
+    pts = (10.0 if not ci.safe else 0.0) + 4.0 * len(ci.needs)
+    names = [NEED_LABELS.get(n, n.title()) for n in ci.needs]
+    reason = ("Not safe" + (": needs " if names else "") if not ci.safe else "Asked for ") + ", ".join(names).lower()
+    return min(20.0, pts), [reason[:1].upper() + reason[1:]]
+
+
 def score(h: Household) -> Household:
     loss = owed_breakdown(h)["total"] if h.claim.losses or h.claim.damage else h.documented_loss
     sev = severity_points(loss)
     frag, frag_r = fragility_points(h)
     sil, sil_r = silence_points(h)
-    reasons = []
+    need, need_r = need_points(h)
+    reasons = list(need_r)
     if loss >= 10000:
         reasons.append("Large contents loss")
     elif loss >= 3000:
@@ -72,9 +88,9 @@ def score(h: Household) -> Household:
     # read naturally: loss, claim status, savings, then the rest
     reasons += sil_r[:1] + frag_r[:1] + sil_r[1:] + frag_r[1:]
     h.documented_loss = round(loss, 2)
-    h.priority_score = float(round(sev + frag + sil))
+    h.priority_score = float(min(100, round(sev + frag + sil + need)))
     h.priority_reasons = reasons
-    h.priority_parts = {"severity": round(sev, 1), "fragility": round(frag, 1), "silence": round(sil, 1)}
+    h.priority_parts = {"severity": round(sev, 1), "fragility": round(frag, 1), "silence": round(sil, 1), "needs": round(need, 1)}
     return h
 
 
@@ -86,7 +102,13 @@ def public_view(h: Household, rank: int | None = None) -> dict:
         "severity": h.priority_parts.get("severity", 0.0), "fragility": h.priority_parts.get("fragility", 0.0),
         "silence": h.priority_parts.get("silence", 0.0),
         "summary": _summary(h.priority_reasons) or "No urgent signals",
+        "needs": h.priority_parts.get("needs", 0.0),
         "claim_filed": h.claim.filed, "synthetic": h.synthetic,
+        "assigned_to": h.assigned_to,
+        "contacted": bool(h.outreach),
+        "last_contact": h.outreach[-1].model_dump() if h.outreach else None,
+        "check_in": h.check_in.model_dump() if h.check_in else None,
+        "shares_hardship": h.fragility_opt_in,
     }
 
 

@@ -17,18 +17,18 @@ function liveCard(b: LBill): Card {
   const base = { id: b.id, name: b.payee, amount: b.amount, due };
   if (b.kind === "mortgage")
     return { ...base, tag: "call", mortgage: true, why: `Ask for a disaster payment pause. Could save ${usd(b.amount)}.`, action: "Get call script",
-      script: "“Our home was damaged in the recent flood. Do you offer disaster forbearance, and can you waive late fees during the pause?”" };
+      script: "“Our home was damaged in the recent disaster. Do you offer disaster forbearance, and can you waive late fees during the pause?”" };
   if (b.label === "call_about")
     return { ...base, tag: "call", why: "Ask to move the due date until the claim pays.", action: "Get call script",
-      script: `“Hi, our home flooded this week. Can you waive fees or move my ${b.payee.toLowerCase()} due date?”` };
+      script: `“Hi, our home was damaged in a disaster this week. Can you waive fees or move my ${b.payee.toLowerCase()} due date?”` };
   if (b.label === "move") return { ...base, tag: "move", why: "Can wait until the claim pays.", action: "Move to after the payout" };
   return { ...base, tag: "pay", why: "Keeps it current. Late fees are paused while Disaster Mode is on.", action: `Pay ${usd(b.amount)}` };
 }
 
 const meta: Record<string, { tag: "pay" | "move" | "call"; why: string; action: string; script?: string }> = {
   b1: { tag: "pay", why: "Missing it hurts your credit. Bridge Funds cover it.", action: "Pay $380" },
-  b2: { tag: "call", why: "Carriers often waive fees after disasters.", action: "Get call script", script: "“Hi, our home flooded on Nov 6. Can you waive this month's fees or move the due date?”" },
-  b3: { tag: "call", why: "Ask for a disaster payment pause. Could save $1,450.", action: "Get call script", script: "“Our home was damaged in the Nov 6 flood. Do you offer disaster forbearance for December?”" },
+  b2: { tag: "call", why: "Carriers often waive fees after disasters.", action: "Get call script", script: "“Hi, our home was damaged in a disaster on Nov 6. Can you waive this month's fees or move the due date?”" },
+  b3: { tag: "call", why: "Ask for a disaster payment pause. Could save $1,450.", action: "Get call script", script: "“Our home was damaged in the Nov 6 disaster. Do you offer disaster forbearance for December?”" },
   b4: { tag: "move", why: "Can wait until the claim pays.", action: "Move to Dec 1" },
 };
 const tag = {
@@ -49,12 +49,14 @@ export default function Bills() {
   const left = cards.filter((b) => !done.includes(b.id));
   const current = left[0];
 
-  function complete(c: Card) {
+  async function complete(c: Card) {
+    if (live.data && !c.mortgage && (c.tag === "pay" || c.tag === "move")) {
+      const err = await live.billAction(c.id, c.tag);
+      if (err) return toast(err); // e.g. not enough in checking: nothing was paid
+    }
+    if (c.mortgage) set({ mortgageCalled: true });
     setDone((d) => [...d, c.id]);
     setScript(null);
-    if (c.mortgage) set({ mortgageCalled: true });
-    else if (c.tag === "pay") live.billAction(c.id, "pay");
-    else if (c.tag === "move") live.billAction(c.id, "move");
     toast(`${c.name}: ${script ? "call logged" : c.action}`);
   }
 

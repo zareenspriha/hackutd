@@ -7,7 +7,7 @@ export const PILLARS: Pillar[] = [
   {
     key: "prove", n: 1, title: "Prove what you lost", blurb: "Scan your rooms. looma builds your claim.",
     items: [
-      { id: "scan", label: "Scan a room", icon: ScanLine },
+      { id: "scan", label: "Home scans", icon: ScanLine },
       { id: "compare", label: "What changed", icon: ArrowLeftRight },
       { id: "claim", label: "Your claim", icon: FileCheck2 },
     ],

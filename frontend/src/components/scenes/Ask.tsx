@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, ArrowUp } from "lucide-react";
+import { ArrowRight, ArrowUp, ShieldAlert, ShieldCheck } from "lucide-react";
 import Cat from "../Cat";
 import { Assumptions, Rise, Stage, useNav } from "../ui";
 import { api } from "@/lib/api";
@@ -11,8 +11,9 @@ type Rich =
   | { kind: "ladder"; rows: { label: string; amount: string; use: boolean }[] }
   | { kind: "when"; now: string; later: string; date: string }
   | { kind: "simulate" }
-  | { kind: "picture" };
-type Msg = { role: "user" | "looma"; text: string; rich?: Rich; next?: string; assumptions?: string[] };
+  | { kind: "picture" }
+  | { kind: "safety"; rows: string[] };
+type Msg = { role: "user" | "looma"; text: string; rich?: Rich; next?: string; assumptions?: string[]; checked?: boolean };
 
 // Scripted answers for the demo. TODO (coach): POST /households/{id}/coach returns these shapes.
 const scripted: Record<string, Omit<Msg, "role">> = {
@@ -48,6 +49,11 @@ const scripted: Record<string, Omit<Msg, "role">> = {
     next: "Call your lender about a disaster payment pause.",
     assumptions: ["Same spending as today", "Paycheck arrives on time"],
   },
+  "Someone called offering to speed up my claim for a fee": {
+    text: "Be careful: that has the signs of a disaster scam. No one from your insurer or bank will ask for a fee, a gift card, a wire or your PIN. Don't pay or share anything.",
+    rich: { kind: "safety", rows: ["Real responders never ask for a fee to speed up a claim", "Never pay with gift cards, wire transfers or crypto", "Never share your password, PIN or one-time codes", "Pay contractors only after work starts, and never more than a third up front"] },
+    next: "Message your adjuster in looma to check.",
+  },
 };
 
 export default function Ask() {
@@ -76,7 +82,8 @@ export default function Ask() {
           text: fromCoach.answer.replace(/\s*Next step: .*$/, ""), // shown separately below the answer
           rich: fromCoach.card ?? undefined,
           next: fromCoach.next_step?.title,
-          assumptions: fromCoach.assumptions.slice(0, 3),
+          assumptions: fromCoach.assumptions.length ? fromCoach.assumptions.slice(0, 3) : undefined,
+          checked: fromCoach.numbers_checked,
         }
       : known ?? (await api.coach("garcia", q).then((r) => ({ text: r.answer, next: r.nextStep })));
     setTimeout(() => {
@@ -140,6 +147,11 @@ export default function Ask() {
                       <p className="text-[16px] leading-relaxed text-midnight"><Headline text={m.text} /></p>
                       {m.rich && <RichCard r={m.rich} />}
                       {m.assumptions && <Assumptions items={m.assumptions} />}
+                      {m.checked && (
+                        <p className="mt-3 flex items-center gap-1.5 text-xs text-dusty-deep">
+                          <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.75} /> Every number checked against your accounts
+                        </p>
+                      )}
                       {m.next && (
                         <p className="mt-4 border-t border-ivory pt-3 text-[15px] text-midnight">
                           <span className="eyebrow mr-2">Next</span>
@@ -219,6 +231,16 @@ function RichCard({ r }: { r: Rich }) {
           <p className="mt-1">{r.later}</p>
         </div>
       </div>
+    );
+  if (r.kind === "safety")
+    return (
+      <ul className="mt-4 space-y-1.5 rounded-2xl bg-clay/10 p-4">
+        {r.rows.map((x) => (
+          <li key={x} className="flex gap-2 text-[15px] text-midnight">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-clay" strokeWidth={1.75} /> {x}
+          </li>
+        ))}
+      </ul>
     );
   if (r.kind === "picture")
     return (

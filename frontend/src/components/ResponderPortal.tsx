@@ -9,8 +9,13 @@ import { LiveProvider } from "@/lib/live";
 
 /**
  * Insurer staff portal at /responders. Families never see a link to it.
- * Demo-level sign-in: any work email. TODO (backend): staff accounts with role checks on /insurer/* routes.
+ * Demo-level sign-in: any work email. Every responder action is signed with the name (X-Staff) and appears in
+ * that family's own activity log. Responders load only the ranking, never a family's balances.
  */
+const nameOf = (email: string) => {
+  const local = email.split("@")[0] ?? "";
+  return local.split(/[._-]/).filter(Boolean).map((p) => p[0]!.toUpperCase() + p.slice(1)).join(" ") || "Responder";
+};
 const KEY = "looma.staff";
 
 export default function ResponderPortal() {
@@ -45,11 +50,11 @@ export default function ResponderPortal() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <LiveProvider>
+      <LiveProvider staffName={staff ? nameOf(staff) : null}>
         <DemoProvider>
           <div className="dark h-dvh overflow-hidden bg-navy">
             {staff ? (
-              <Lantern staff={staff} onSignOut={signOut} />
+              <Lantern staff={nameOf(staff)} onSignOut={signOut} />
             ) : (
               <div className="flex h-full items-center justify-center p-6">
                 <motion.form

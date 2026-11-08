@@ -30,6 +30,15 @@ class GItem(BaseModel):
     frame_ts: float
 
 
+class GBox(BaseModel):
+    name: str
+    box_2d: list[int]  # [ymin, xmin, ymax, xmax], 0-1000
+
+
+class GBoxes(BaseModel):
+    items: list[GBox]
+
+
 class GRoom(BaseModel):
     items: list[GItem]
     missing_areas: list[str]
@@ -62,6 +71,10 @@ didn't show, written as "I didn't see the closet" (closets, cabinets, drawers, s
 ceilings, floors, hallways or other rooms. Leave it empty if the video covers the main area where things are kept.
 Only list items actually visible. Do not guess hidden items."""
 
+LOCATE_PROMPT = """Find each of these items in the photo and return a tight bounding box for each one as
+box_2d = [ymin, xmin, ymax, xmax], normalized to 0-1000. Use the exact item names given. Skip any item you can't see.
+Items: {names}"""
+
 DAMAGE_PROMPT = """This photo shows damage to a home after a disaster. Describe the main damage in one short line,
 name the area (e.g. "Living room floor"), and estimate a repair cost in USD for a typical Texas contractor."""
 
@@ -84,7 +97,7 @@ def _mock_room(room: str, phase: str) -> GRoom:
     items = []
     for name, cat, lo, hi, age, ts in DEMO_TABLE:
         if phase == "after" and name.startswith("Apple MacBook"):
-            continue  # taken away when "the flood hits"
+            continue  # gone after the disaster
         items.append(GItem(name=name, category=cat, condition="good", value_low=lo, value_high=hi, age_years=age, frame_ts=ts))
     return GRoom(items=items, missing_areas=[])
 
@@ -175,6 +188,22 @@ class Gemini:
 
     async def analyze_room(self, path: str, room: str, phase: str) -> tuple[GRoom, str]:
         return await asyncio.to_thread(self.analyze_room_sync, path, room, phase)
+
+    # ---- item boxes on a real frame ----
+    async def locate(self, jpeg: bytes, names: list[str]) -> dict[str, list[int]]:
+        """Where each named item is in this frame (for zoomed proof photos). Empty in mock mode."""
+        if self.mock or not names:
+            return {}
+        try:
+            r = await asyncio.to_thread(self._image, jpeg, "image/jpeg", LOCATE_PROMPT.format(names="; ".join(names)), GBoxes)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Locating items failed: %s", e)
+            return {}
+        out = {}
+        for b in r.items:
+            if len(b.box_2d) == 4 and b.box_2d[2] > b.box_2d[0] and b.box_2d[3] > b.box_2d[1]:
+                out[b.name.strip().lower()] = [max(0, min(1000, v)) for v in b.box_2d]
+        return out
 
     # ---- photos / receipts ----
     def _image(self, data: bytes, mime: str, prompt: str, schema: type[BaseModel]) -> BaseModel:

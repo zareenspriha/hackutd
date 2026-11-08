@@ -21,6 +21,8 @@ const tone: Record<CItem["status"], { label: string; stroke: string; dash?: stri
   unchanged: { label: "Unchanged", stroke: "#6e9277", chip: "bg-sage text-cream-2", Icon: CheckCircle2 },
 };
 
+const fmtDate = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
 export default function Compare() {
   const { data } = useLive();
   return data ? <LiveCompare /> : <MockCompare />;
@@ -55,7 +57,7 @@ function MockCompare() {
       left={
         <>
           <Rise>
-            <p className="eyebrow">Living room · Before and after</p>
+            <p className="eyebrow">Living room · Home record vs after the disaster</p>
             <h1 className="headline mt-4 text-[60px]">
               What <span className="text-dusty">changed.</span>
             </h1>
@@ -142,8 +144,8 @@ function MockCompare() {
                 <motion.div key={mode} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25, ease: EASE }}>
                   {mode === "side" && (
                     <div className="grid grid-cols-2 gap-3">
-                      <Frame label="Before · Nov 2" phase="before" items={items} boxes="before" />
-                      <Frame label="After · Nov 8" phase="after" items={items} boxes="after" />
+                      <Frame label="Home record · Jun 9" phase="before" items={items} boxes="before" />
+                      <Frame label="After the disaster · Nov 4" phase="after" items={items} boxes="after" />
                     </div>
                   )}
                   {mode === "slider" && <Slider items={items} />}
@@ -231,7 +233,7 @@ function Slider({ items }: { items: CItem[] }) {
             <ArrowLeftRight className="h-5 w-5" strokeWidth={1.75} />
           </span>
         </div>
-        <span className="absolute left-4 top-4 rounded-full bg-navy/60 px-3 py-1 text-xs text-cream-2">Before</span>
+        <span className="absolute left-4 top-4 rounded-full bg-navy/60 px-3 py-1 text-xs text-cream-2">Home record</span>
         <span className="absolute right-4 top-4 rounded-full bg-navy/60 px-3 py-1 text-xs text-cream-2">After</span>
       </div>
       <input type="range" min={0} max={100} value={pos} onChange={(e) => setPos(+e.target.value)} className="sr-only" aria-label="Compare before and after" />
@@ -313,23 +315,24 @@ function LiveCompare() {
   const [mode, setMode] = useState<"side" | "slider">("side");
   const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sel, setSel] = useState<string | null>(null);
 
   useEffect(() => {
     live.compare(room).then((r) => r && setC(r));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room, live.data]);
 
-  if (!c) return <div className="flex h-full items-center justify-center text-dusty-deep">Loading your rooms…</div>;
+  if (!c) return <div className="flex h-full items-center justify-center text-dusty-deep">Lining up your before and after photos…</div>;
 
   if (!c.room || !c.items)
     return (
       <Stage
         left={
           <Rise>
-            <p className="eyebrow">Before and after</p>
+            <p className="eyebrow">Home record vs after the disaster</p>
             <h1 className="headline mt-4 text-[60px]">Nothing to compare <span className="text-dusty">yet.</span></h1>
-            <p className="mt-4 text-lg text-dusty-deep">Record a room before and after the flood. looma lines them up here.</p>
-            <button onClick={() => go("scan")} className="pill-dark mt-8">Scan a room</button>
+            <p className="mt-4 text-lg text-dusty-deep">Keep a home record of each room (looma reminds you every six months). After a disaster, scan it again and looma lines the two up here.</p>
+            <button onClick={() => go("scan")} className="pill-dark mt-8">Go to home scans</button>
           </Rise>
         }
         right={<div />}
@@ -338,6 +341,14 @@ function LiveCompare() {
 
   const changed = c.items.filter((i) => i.status !== "unchanged");
   const list = showAll ? c.items : changed;
+  // The item in the big before/after view: the one you tapped, else the first thing that changed.
+  const focus = c.items.find((i) => i.name === sel) ?? changed[0] ?? c.items[0] ?? null;
+  const shot = {
+    before: focus ? frameUrl(c.room, "before", focus.before_ts, focus.before_box, "mark") : frameUrl(c.room, "before", c.before_ts),
+    after: focus && focus.after_ts != null
+      ? frameUrl(c.room, "after", focus.after_ts, focus.after_box, "mark")
+      : frameUrl(c.room, "after", c.after_ts),
+  };
   const counts = (["destroyed", "damaged", "missing", "unchanged"] as const)
     .map((st) => [st, c.items!.filter((i) => i.status === st).length] as const)
     .filter(([, n]) => n);
@@ -361,7 +372,7 @@ function LiveCompare() {
       left={
         <>
           <Rise>
-            <p className="eyebrow">{c.room} · Before and after</p>
+            <p className="eyebrow">{c.room} · {c.before_taken_on ? `Home record from ${fmtDate(c.before_taken_on)}` : "Home record"} vs after the disaster</p>
             <h1 className="headline mt-4 text-[60px]">
               What <span className="text-dusty">changed.</span>
             </h1>
@@ -386,14 +397,27 @@ function LiveCompare() {
             {list.map((it) => {
               const t = liveTone[it.status];
               return (
-                <motion.div layout key={it.name} className="flex items-center gap-3 rounded-[20px] border border-navy/[0.08] bg-cream p-3 shadow-[0_1px_2px_rgba(15,26,43,0.06),0_8px_24px_rgba(15,26,43,0.06)]">
+                <motion.div
+                  layout
+                  key={it.name}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSel(it.name)}
+                  onKeyDown={(e) => e.key === "Enter" && setSel(it.name)}
+                  aria-pressed={focus?.name === it.name}
+                  className={`flex cursor-pointer items-center gap-3 rounded-[20px] border bg-cream p-3 shadow-[0_1px_2px_rgba(15,26,43,0.06),0_8px_24px_rgba(15,26,43,0.06)] transition ${focus?.name === it.name ? "border-midnight ring-1 ring-midnight" : "border-navy/[0.08] hover:border-midnight/40"}`}
+                >
                   {c.has_video ? (
                     <div className="flex shrink-0 gap-1">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={frameUrl(c.room!, "before", it.before_ts)} alt={`${it.name} before`} className="h-14 w-14 rounded-xl object-cover" />
+                      <img src={frameUrl(c.room!, "before", it.before_ts, it.before_box, "crop")} alt={`${it.name} in your home record`} className="h-14 w-14 rounded-xl bg-navy object-cover" />
                       {it.status !== "unchanged" && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={frameUrl(c.room!, "after", it.after_ts ?? it.before_ts)} alt={`${it.name} after`} className="h-14 w-14 rounded-xl object-cover" />
+                        it.after_ts != null ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={frameUrl(c.room!, "after", it.after_ts, it.after_box, "crop")} alt={`The same spot after the disaster`} className="h-14 w-14 rounded-xl bg-navy object-cover" />
+                        ) : (
+                          <span className="flex h-14 w-14 items-center justify-center rounded-xl bg-navy/10 text-center text-[10px] leading-tight text-dusty-deep">Not in<br />after video</span>
+                        )
                       )}
                     </div>
                   ) : null}
@@ -443,26 +467,37 @@ function LiveCompare() {
                 </button>
               ))}
             </div>
+            {focus && (
+              <p className="mb-3 text-[17px] text-navy">
+                <b className="font-medium">{focus.name}</b>{" "}
+                <span className="text-dusty-deep">
+                  {focus.status === "missing"
+                    ? focus.after_ts != null ? "· in your home record, gone from the same spot after" : "· in your home record, not seen in the after video"
+                    : focus.status === "unchanged" ? "· still there" : `· ${liveTone[focus.status].label.toLowerCase()} after the disaster`}
+                </span>
+              </p>
+            )}
             {mode === "side" ? (
               <div className="grid grid-cols-2 gap-3">
                 {(["before", "after"] as const).map((ph) => (
                   <div key={ph}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={frameUrl(c.room!, ph, ph === "before" ? c.before_ts : c.after_ts)} alt={`${c.room} ${ph}`} className="aspect-[4/3] w-full rounded-[24px] object-cover shadow-[0_24px_50px_-28px_rgba(15,26,43,0.6)]" />
-                    <p className="mt-2 text-sm text-dusty-deep">{ph === "before" ? "Before" : "After the flood"}</p>
+                    <img key={shot[ph]} src={shot[ph]} alt={ph === "before" ? `${focus?.name ?? c.room} in your home record` : "The same spot after the disaster"} className="aspect-[4/3] w-full rounded-[24px] bg-navy object-cover shadow-[0_24px_50px_-28px_rgba(15,26,43,0.6)]" />
+                    <p className="mt-2 text-sm text-dusty-deep">{ph === "before" ? `Home record${c.before_taken_on ? ` · ${fmtDate(c.before_taken_on)}` : ""}` : `After the disaster${c.after_taken_on ? ` · ${fmtDate(c.after_taken_on)}` : ""}`}</p>
                   </div>
                 ))}
               </div>
             ) : (
-              <PhotoSlider before={frameUrl(c.room!, "before", c.before_ts)} after={frameUrl(c.room!, "after", c.after_ts)} />
+              <PhotoSlider before={shot.before} after={shot.after} />
             )}
+            <p className="mt-3 text-xs text-dusty-deep">Real frames from your two videos. looma finds the same spot in both, so the adjuster sees exactly what changed.</p>
             {!!c.quality_warnings?.length && <p className="mt-3 text-sm text-dusty-deep">Video note: {c.quality_warnings[0]}</p>}
           </div>
         ) : (
           <div className="rounded-[28px] border border-dashed border-midnight/20 p-10 text-center">
             <p className="text-lg text-navy">These items came from an earlier scan.</p>
             <p className="mt-1 text-dusty-deep">Record this room again to see the before and after photos side by side.</p>
-            <button onClick={() => go("scan")} className="pill-light mt-6">Scan a room</button>
+            <button onClick={() => go("scan")} className="pill-light mt-6">Go to home scans</button>
           </div>
         )
       }
@@ -496,7 +531,7 @@ function PhotoSlider({ before, after }: { before: string; after: string }) {
             <ArrowLeftRight className="h-5 w-5" strokeWidth={1.75} />
           </span>
         </div>
-        <span className="absolute left-4 top-4 rounded-full bg-navy/60 px-3 py-1 text-xs text-cream-2">Before</span>
+        <span className="absolute left-4 top-4 rounded-full bg-navy/60 px-3 py-1 text-xs text-cream-2">Home record</span>
         <span className="absolute right-4 top-4 rounded-full bg-navy/60 px-3 py-1 text-xs text-cream-2">After</span>
       </div>
       <input type="range" min={0} max={100} value={pos} onChange={(e) => setPos(+e.target.value)} className="sr-only" aria-label="Compare before and after" />

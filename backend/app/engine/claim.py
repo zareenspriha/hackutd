@@ -55,7 +55,8 @@ def missing_pieces(h: Household) -> list[str]:
     unconfirmed = [l for l in h.claim.losses if not l.confirmed]
     if unconfirmed:
         out.append(f"Review {len(unconfirmed)} item(s) on your loss list")
-    for s in h.scans:
+    latest = {(s.room, s.phase): h.latest_scan(s.room, s.phase) for s in h.scans}
+    for s in latest.values():
         for area in s.missing_areas:
             out.append(f"{s.room}: {area}")
     if h.disaster_mode and not h.claim.receipts:

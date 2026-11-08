@@ -20,6 +20,7 @@ class Item(BaseModel):
     value_high: float
     age_years: float = 2.0
     frame_ts: float | None = None  # seconds into the video where the item is clearest
+    box: list[int] | None = None  # where it is in that frame: [ymin, xmin, ymax, xmax], 0-1000
     replacement_cost: float = 0.0
     actual_cash_value: float = 0.0
 
@@ -31,6 +32,8 @@ class RoomScan(BaseModel):
     missing_areas: list[str] = []
     quality_warnings: list[str] = []
     video_path: str | None = None
+    proof_ready: bool = False  # real frames indexed and item boxes found
+    taken_on: date | None = None  # home records are redone every 6 months; the newest one is the baseline
 
 
 class LossItem(BaseModel):
@@ -42,7 +45,10 @@ class LossItem(BaseModel):
     actual_cash_value: float
     before_frame_ts: float | None = None
     after_frame_ts: float | None = None
+    before_box: list[int] | None = None
+    after_box: list[int] | None = None  # for a missing item: where it used to be, lined up in the after video
     confirmed: bool = False  # family reviewed it
+    ai_replacement_cost: float | None = None  # the scan's estimate, kept when the family edits the value
 
 
 class DamageLine(BaseModel):
@@ -112,6 +118,30 @@ class HelpTransfer(BaseModel):
     note: str = ""
 
 
+class Outreach(BaseModel):
+    """A responder reaching the family (or an automated check-in). Shown to the family as a message."""
+    ts: str
+    by: str
+    kind: Literal["check_in", "assign", "bridge_offer", "sweep"]
+    note: str
+
+
+class CheckIn(BaseModel):
+    """The family's own answer to 'Are you safe?'. Raises their priority; never lowers it."""
+    ts: str
+    safe: bool
+    needs: list[str] = []
+
+
+class ActivityEvent(BaseModel):
+    """Audit trail the family can read: who did what with their data or money."""
+    ts: str
+    actor: str  # "You", "Responder Jordan", "looma", "Your bank"
+    text: str
+    amount: float | None = None
+    bank_ref: str | None = None  # Nessie transaction id when money moved
+
+
 class CircleMember(BaseModel):
     name: str
     relation: str = "family"
@@ -135,7 +165,11 @@ class Household(BaseModel):
     bridge: BridgeFunds = Field(default_factory=BridgeFunds)
     help_circle: list[HelpTransfer] = []
     circle: list[CircleMember] = []  # people the family can ask for help
-    paycheck_delay_days: int = 0  # employer closed after the disaster: next paycheck arrives late
+    paycheck_delay_days: int = 0
+    outreach: list[Outreach] = []
+    assigned_to: str | None = None
+    check_in: CheckIn | None = None
+    activity: list[ActivityEvent] = []  # employer closed after the disaster: next paycheck arrives late
     disaster_mode: bool = False
     days_since_disaster: int = 0
     days_since_last_activity: int = 0
@@ -156,6 +190,11 @@ class Household(BaseModel):
     priority_reasons: list[str] = []
     priority_parts: dict[str, float] = {}  # severity / fragility / silence points
     documented_loss: float = 0.0
+
+    def latest_scan(self, room: str, phase: str) -> "RoomScan | None":
+        """Newest scan of a room (home records keep a history; comparisons use the newest one)."""
+        found = [s for s in self.scans if s.room == room and s.phase == phase]
+        return max(found, key=lambda s: s.taken_on or date.min) if found else None
 
 
 # ---------- What-if ----------

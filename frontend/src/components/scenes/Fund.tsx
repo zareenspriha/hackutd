@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useTransform, animate } from "motion/react";
-import { ArrowLeft, ArrowRight, ChevronsUpDown, Delete } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronsUpDown, Delete, Landmark, ShieldAlert } from "lucide-react";
 import Cat from "../Cat";
 import { useDemo } from "../demo";
 import { Assumptions, EASE, useNav } from "../ui";
@@ -29,6 +29,7 @@ export default function Fund() {
   const [step, setStep] = useState<Step>(allTaken ? "done" : "amount");
   const [raw, setRaw] = useState(allTaken ? String(MAX) : "");
   const [taken, setTaken] = useState<number | null>(null);
+  const [ref, setRef] = useState<string | null>(null);
   const amount = Math.min(Number(raw || 0), MAX);
 
   function press(k: string) {
@@ -146,8 +147,15 @@ export default function Fund() {
                     <Swipe
                       onDone={async () => {
                         setTaken(amount);
-                        if (d) await live.takeBridge(amount);
-                        else await api.unlockBridgeFunds();
+                        if (d) {
+                          const r = await live.takeBridge(amount);
+                          if (!r) {
+                            toast("That didn't go through. Nothing was moved.");
+                            setTaken(null);
+                            return setStep("amount");
+                          }
+                          setRef(r.ref);
+                        } else await api.unlockBridgeFunds();
                         set({ bridgeTaken: true });
                         toast("It's in your checking account.");
                         setStep("done");
@@ -161,6 +169,14 @@ export default function Fund() {
                 <CardReveal amount={taken ?? (d ? d.bridge.drawn : amount || MAX)} />
                 <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }} className="mt-8 text-center text-ivory/80">
                   Checking now <span className="tnum text-cream-2">${Math.round(d ? checking : checking + (amount || MAX)).toLocaleString()}</span>
+                </motion.p>
+                {ref && (
+                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.4 }} className="tnum mt-2 flex items-center gap-1.5 text-xs text-ivory/60">
+                    <Landmark className="h-3.5 w-3.5" strokeWidth={1.75} /> Confirmed by your bank · ref {ref.slice(0, 10)}
+                  </motion.p>
+                )}
+                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.6 }} className="mt-6 flex max-w-[320px] gap-2 rounded-[14px] bg-ivory/10 px-4 py-3 text-xs text-ivory/80">
+                  <ShieldAlert className="h-4 w-4 shrink-0" strokeWidth={1.75} /> Scam shield: no one from looma, your bank or your insurer will ask you to send this money anywhere.
                 </motion.p>
               </motion.div>
             )}

@@ -111,25 +111,25 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
 
   const actions = [
     {
-      icon: ScanLine, label: "Load before scan",
+      icon: ScanLine, label: "Load home record",
       run: async () => {
         if (live.data && !(await live.demo.presetScan("before"))) return toast("Preset scans need the mock analyzer");
         set({ scanPreset: "before" });
-        toast("Living room before scan loaded");
+        toast("Garage home record loaded");
       },
     },
     {
-      icon: ScanLine, label: "Load after scan",
+      icon: ScanLine, label: "Load after-disaster scan",
       run: async () => {
-        if (live.data && !(await live.demo.presetScan("after"))) return toast("Load the before scan first");
+        if (live.data && !(await live.demo.presetScan("after"))) return toast("Load the home record first");
         set({ scanPreset: "after" });
-        toast("Living room after scan loaded. Check Compare.");
+        toast("After-disaster scan loaded. Check What changed.");
       },
     },
     {
-      icon: CloudRain, label: "Trigger flood",
+      icon: CloudRain, label: "Trigger disaster",
       run: async () => {
-        if (live.data) await live.demo.flood();
+        if (live.data) await live.demo.disaster();
         else set({ disasterMode: true });
         toast("Disaster Mode is on. Late fees are paused.");
       },
@@ -171,8 +171,23 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
 
       {/* presenter panel */}
       <AnimatePresence>
+        {!panel && (
+          <motion.button
+            key="demo-tab"
+            initial={{ x: 40, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 40, opacity: 0 }}
+            onClick={() => setPanel(true)}
+            aria-label="Open demo controls"
+            title="Demo controls (Shift+D)"
+            className="fixed right-0 top-1/2 z-40 -translate-y-1/2 rounded-l-[14px] bg-navy px-2 py-4 text-[11px] font-medium uppercase tracking-[0.2em] text-ivory/80 shadow-lg transition hover:bg-midnight hover:text-cream-2 [writing-mode:vertical-rl]"
+          >
+            Demo
+          </motion.button>
+        )}
         {panel && (
           <motion.aside
+            key="demo-panel"
             initial={{ x: 380 }}
             animate={{ x: 0 }}
             exit={{ x: 380 }}

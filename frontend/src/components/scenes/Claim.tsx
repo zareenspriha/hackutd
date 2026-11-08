@@ -1,13 +1,13 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, Camera, Check, CheckCircle2, Image as ImageIcon, Loader2, Receipt } from "lucide-react";
+import { AlertCircle, ArrowRight, Camera, Check, CheckCircle2, Image as ImageIcon, Loader2, Receipt, ShieldCheck } from "lucide-react";
 import { useDemo } from "../demo";
 import { CountUp, EASE, Rise, Stage, useNav } from "../ui";
 import { garcias } from "@/lib/mock";
 import { usd } from "@/lib/format";
 import type { ClaimLine } from "@/lib/types";
-import { useLive, type LClaim } from "@/lib/live";
+import { useLive, type LClaim, type LClaimCheck } from "@/lib/live";
 
 /** Backend claim -> receipt lines: belongings grouped by room, then damage and receipts. */
 function liveLines(c: LClaim): ClaimLine[] {
@@ -38,13 +38,18 @@ export default function Claim() {
   const damageIn = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<"receipt" | "damage" | null>(null);
   const [lastDamage, setLastDamage] = useState<string | null>(null);
+  const [check, setCheck] = useState<LClaimCheck | null>(null);
+  useEffect(() => {
+    if (d) live.claimCheck().then(setCheck);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d]);
 
   async function uploadPhoto(kind: "receipt" | "damage", f: File) {
     setBusy(kind);
     try {
       if (kind === "receipt") {
         const r = await live.receiptPhoto(f);
-        toast(`${usd(r.countable)} of ${usd(r.total)} added to your claim`);
+        toast(r.duplicate ? `That ${r.merchant} receipt is already on your claim` : `${usd(r.countable)} of ${usd(r.total)} added to your claim`);
       } else {
         const r = await live.damagePhoto(f);
         setLastDamage(`${r.line.area}: ${r.line.description} · about ${usd(r.line.estimated_cost)}`);
@@ -150,7 +155,7 @@ export default function Claim() {
               ) : (
                 <motion.div key="sent" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.3, ease: EASE }} className="rounded-[20px] bg-midnight p-6 text-cream-2">
                   <p className="inline-flex items-center gap-1.5 rounded-full bg-sage/20 px-2.5 py-1 text-xs font-medium text-[#a9c7b0]">
-                    <Check className="h-3.5 w-3.5" /> Claim filed Nov 8
+                    <Check className="h-3.5 w-3.5" /> Claim filed {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                   </p>
                   <p className="mt-3 text-[28px] font-light leading-tight">Your proof just unlocked {usd(unlocked)}.</p>
                   <button onClick={() => go("fund")} className="pill mt-5 bg-cream-2 text-midnight hover:bg-white">
@@ -185,7 +190,7 @@ export default function Claim() {
                 </div>
                 <ul className="mt-1.5">
                   <AnimatePresence initial={false}>
-                    {ls.length === 0 && <li className="py-2 text-[15px] text-dusty-deep">{k === "home_damage" ? "No damage photos yet." : k === "belongings" ? "Scan a room to add items." : "No receipts yet. Snap one to add it."}</li>}
+                    {ls.length === 0 && <li className="py-2 text-[15px] text-dusty-deep">{k === "home_damage" ? "No damage photos yet." : k === "belongings" ? "Scan a room after the disaster to add items." : "No receipts yet. Snap one to add it."}</li>}
                     {ls.map((l) => (
                       <motion.li
                         key={l.id}
@@ -218,6 +223,23 @@ export default function Claim() {
               <span className="flex items-center gap-1 text-[#3f6248]"><Check className="h-3.5 w-3.5" /> Fully documented</span>
             )}
           </div>
+          {check && (
+            <div className="mt-6 rounded-[18px] bg-cream p-4">
+              <p className="flex items-center gap-2 text-sm font-medium text-navy">
+                <ShieldCheck className="h-4 w-4" strokeWidth={1.75} /> Claim check · {check.passed} of {check.total} passed
+                <span className={`ml-auto rounded-full px-2.5 py-0.5 text-xs ${check.ready ? "bg-sage/20 text-[#3f6248]" : "bg-amber/25 text-[#7a5a1f]"}`}>{check.summary}</span>
+              </p>
+              <ul className="mt-3 space-y-2">
+                {check.checks.map((c) => (
+                  <li key={c.id} className="flex gap-2 text-sm">
+                    {c.status === "pass" ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-sage" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber" strokeWidth={1.75} />}
+                    <span><span className="text-navy">{c.label}.</span> <span className="text-dusty-deep">{c.detail}</span></span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-xs text-dusty-deep">Your adjuster sees the same checks. Nothing is rejected automatically.</p>
+            </div>
+          )}
           <div className="absolute inset-x-0 -bottom-3 h-3 bg-[linear-gradient(135deg,#f2f1ee_50%,transparent_50%),linear-gradient(225deg,#f2f1ee_50%,transparent_50%)] bg-[size:18px_12px]" />
         </motion.div>
       }

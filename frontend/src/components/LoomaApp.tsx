@@ -2,15 +2,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import {
-  LogOut, ArrowLeft, ArrowRight, Check, ArrowLeftRight, CalendarClock, FileCheck2, HandCoins, HandHeart, Home, MessageCircle, ScanLine, Sparkles, Wallet,
+  LogOut, ArrowLeft, ArrowRight, Check, Home, ShieldCheck,
 } from "lucide-react";
 import Logo from "./Logo";
 import { NavCtx, SCENES, type SceneId } from "./ui";
 import { PILLARS, pillarOf } from "./pillars";
 import { DemoProvider, useDemo } from "./demo";
-import { LiveProvider } from "@/lib/live";
+import { LiveProvider, useLive } from "@/lib/live";
 import { AuthProvider, initials, useAuth } from "@/lib/auth";
 import AuthModal, { type AuthMode } from "./AuthModal";
+import { TrustPanel } from "./Trust";
 import Landing from "./scenes/Title";
 import Today from "./scenes/Today";
 import Scan from "./scenes/Scan";
@@ -45,10 +46,12 @@ export default function LoomaApp() {
 
 function Shell() {
   const { s: demo } = useDemo();
+  const live = useLive();
   const { user, ready, logOut } = useAuth();
   const [scene, setScene] = useState<SceneId>("title");
   const [auth, setAuth] = useState<AuthMode | null>(null);
   const [after, setAfter] = useState<SceneId>("today");
+  const [trust, setTrust] = useState(false);
   const [dir, setDir] = useState(1);
 
   const go = useCallback(
@@ -126,7 +129,7 @@ function Shell() {
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cream-2 text-xs font-medium text-navy">{user ? initials(user) : ""}</span>
                   <div className="min-w-0 leading-tight">
                     <p className="truncate text-sm text-cream-2">{user?.name}</p>
-                    <p className="text-xs text-ivory/70">Day 2 · Claim {demo.claimFiled ? "filed" : "pending"}</p>
+                    <p className="text-xs text-ivory/70">Day {live.data?.home.days_since_disaster ?? 2} · Claim {demo.claimFiled ? "filed" : "pending"}</p>
                   </div>
                 </div>
 
@@ -165,12 +168,16 @@ function Shell() {
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber" /> Disaster Mode is on. Late fees are paused.
                   </button>
                 )}
+                <button onClick={() => setTrust(true)} className="flex h-10 items-center gap-3 rounded-[12px] px-3 text-[14px] text-ivory/75 hover:bg-ivory/5 hover:text-cream-2">
+                  <ShieldCheck className="h-[18px] w-[18px]" strokeWidth={1.75} /> Privacy and activity
+                </button>
                 <button onClick={() => (logOut(), go("title"))} className="flex h-10 items-center gap-3 rounded-[12px] px-3 text-[14px] text-ivory/75 hover:bg-ivory/5 hover:text-cream-2">
                   <LogOut className="h-[18px] w-[18px]" strokeWidth={1.75} /> Log out
                 </button>
                 <p className="px-3 pt-2 text-[11px] text-ivory/40">← → to move · Shift+D for demo</p>
               </motion.aside>
 
+              <TrustPanel open={trust} onClose={() => setTrust(false)} />
               {/* content pane */}
               <main className="pane relative min-w-0 flex-1 overflow-hidden rounded-[24px] bg-butter">
                 <div className="pointer-events-none absolute -left-40 -top-40 h-[520px] w-[520px] rounded-full bg-white/40 blur-[110px]" />

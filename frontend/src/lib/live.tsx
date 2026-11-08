@@ -18,6 +18,8 @@ export type LHome = {
   bridge: { amount: number; disbursed: boolean; repaid: boolean }; next_steps: LNextStep[];
   help_circle: LHelp[]; mortgage_pause_requested: boolean; lat: number; lng: number;
   circle?: LCircleMember[]; paycheck_delay_days?: number;
+  check_in?: LCheckIn | null; share_hardship?: boolean; assigned_to?: string | null; messages?: LOutreach[];
+  days_since_disaster?: number;
 };
 export type LAccount = { key: string; type: string; amount: number; text: string; limit?: number; monthly_payment?: number; matures_in_weeks?: number };
 export type LBill = {
@@ -48,7 +50,26 @@ export type LCash = { nearest_working: LAtm | null; working: LAtm[]; out_of_serv
 export type LPriority = {
   id: string; name: string; rank: number; lat: number; lng: number; zip: string; score: number;
   severity: number; fragility: number; silence: number; reasons: string[]; claim_filed: boolean; synthetic: boolean;
+  needs?: number; summary?: string; assigned_to?: string | null; contacted?: boolean; last_contact?: LOutreach | null;
+  check_in?: LCheckIn | null; shares_hardship?: boolean;
 };
+export type LOutreach = { ts: string; by: string; kind: "check_in" | "assign" | "bridge_offer" | "sweep"; note: string };
+export type LCheckIn = { ts: string; safe: boolean; needs: string[] };
+export type LActivity = { ts: string; actor: string; text: string; amount: number | null; bank_ref: string | null };
+export type LActivityView = {
+  events: LActivity[]; messages: LOutreach[]; assigned_to: string | null; check_in: LCheckIn | null; share_hardship: boolean;
+  responders_see: string[]; responders_never_see: string[];
+};
+export type LClaimCheck = { passed: number; total: number; ready: boolean; summary: string;
+  checks: { id: string; label: string; status: "pass" | "review"; detail: string }[] };
+export type LCoverage = { households: number; no_claim_started: number; urgent: number; urgent_reached: number;
+  coverage_pct: number; overlooked: number; asked_for_help: number };
+export type LHomeRecord = {
+  every_days: number; next_due: string | null; total_value: number;
+  rooms: { room: string; records: { taken_on: string; items: number; value: number; has_video: boolean }[];
+    last_recorded: string | null; next_due: string | null; overdue: boolean; after_scanned: boolean; after_taken_on: string | null }[];
+};
+export type StaffData = { priority: LPriority[]; summary: LCoverage };
 export type LScanItem = { name: string; category: string; room: string; condition: string; replacement_cost: number; actual_cash_value: number; frame_ts: number | null };
 export type LScanResult = {
   room: string; phase: "before" | "after"; analysis_method: string; items: LScanItem[]; inventory_total: number;
@@ -57,10 +78,11 @@ export type LScanResult = {
 export type LCompareItem = {
   name: string; category: string; status: "unchanged" | "missing" | "damaged" | "destroyed";
   replacement_cost: number; actual_cash_value: number; before_ts: number | null; after_ts: number | null;
+  before_box?: number[] | null; after_box?: number[] | null;
   loss_index: number | null; confirmed: boolean;
 };
 export type LCompare = {
-  rooms: string[]; room: string | null; items?: LCompareItem[]; has_video?: boolean; before_ts?: number; after_ts?: number;
+  rooms: string[]; room: string | null; items?: LCompareItem[]; before_taken_on?: string | null; after_taken_on?: string | null; records?: number; has_video?: boolean; before_ts?: number; after_ts?: number;
   loss_total?: number; unconfirmed?: number; quality_warnings?: string[];
 };
 export type LDamage = { description: string; area: string; estimated_cost: number };
@@ -69,12 +91,13 @@ export type LCard =
   | { kind: "ladder"; rows: { label: string; amount: string; use: boolean }[] }
   | { kind: "when"; now: string; later: string; date: string }
   | { kind: "simulate" }
-  | { kind: "picture" };
-export type LCoach = { intent: string; answer: string; card: LCard | null; next_step: LNextStep | null; assumptions: string[] };
+  | { kind: "picture" }
+  | { kind: "safety"; rows: string[] };
+export type LCoach = { intent: string; answer: string; card: LCard | null; next_step: LNextStep | null; assumptions: string[]; numbers_checked?: boolean };
 
 export type LiveData = {
   home: LHome; accounts: LAccount[]; bills: LBill[]; health: LHealth; ladder: LRung[]; claim: LClaim;
-  bridge: LBridge; forecast: LForecast; cash: LCash; priority: LPriority[];
+  bridge: LBridge; forecast: LForecast; cash: LCash;
 };
 
 export type Scenario = { claimDelayDays?: number; payoutPct?: number; missedWorkDays?: number; mortgagePause?: boolean };
@@ -83,12 +106,15 @@ export type Scenario = { claimDelayDays?: number; payoutPct?: number; missedWork
 
 export type LCircleMember = { name: string; relation: string; invited: boolean; sent: number };
 
-async function req<T>(method: "GET" | "POST", path: string, body?: unknown, form?: FormData): Promise<T> {
+async function req<T>(method: "GET" | "POST", path: string, body?: unknown, form?: FormData, staff?: string): Promise<T> {
   if (!API) throw new Error("No API configured");
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (staff) headers["X-Staff"] = staff;
   const res = await fetch(`${API}${path}`, {
     method,
     cache: "no-store",
-    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    headers,
     body: form ?? (body !== undefined ? JSON.stringify(body) : undefined),
   });
   if (!res.ok) {
@@ -112,7 +138,8 @@ export function scenarioQuery(s?: Scenario): string {
 }
 
 async function loadAll(): Promise<LiveData> {
-  const [home, accounts, bills, health, ladder, claim, bridge, forecast, cash, priority] = await Promise.all([
+  // Family data only: the family app never downloads other households or the responder ranking.
+  const [home, accounts, bills, health, ladder, claim, bridge, forecast, cash] = await Promise.all([
     req<LHome>("GET", hh()),
     req<{ accounts: LAccount[] }>("GET", hh("/accounts")),
     req<{ bills: LBill[] }>("GET", hh("/bills")),
@@ -122,12 +149,17 @@ async function loadAll(): Promise<LiveData> {
     req<LBridge>("GET", hh("/bridge")),
     req<LForecast>("GET", hh("/forecast")),
     req<LCash>("GET", hh("/cash-access")),
-    req<{ households: LPriority[] }>("GET", "/insurer/households?limit=2002"),
   ]);
-  return {
-    home, accounts: accounts.accounts, bills: bills.bills, health, ladder: ladder.ladder, claim, bridge, forecast, cash,
-    priority: priority.households,
-  };
+  return { home, accounts: accounts.accounts, bills: bills.bills, health, ladder: ladder.ladder, claim, bridge, forecast, cash };
+}
+
+// Responder data only: ranking and coverage, never balances.
+async function loadStaff(): Promise<StaffData> {
+  const [list, summary] = await Promise.all([
+    req<{ households: LPriority[] }>("GET", "/insurer/households?limit=2002"),
+    req<LCoverage & { adjuster_queue: unknown }>("GET", "/insurer/summary"),
+  ]);
+  return { priority: list.households, summary };
 }
 
 // ---------- context ----------
@@ -142,21 +174,33 @@ type Live = {
   whatIf: (s: Scenario) => Promise<{ forecast: LForecast; next_steps: LNextStep[] } | null>;
   fileClaim: () => Promise<void>;
   addReceipt: (r: { merchant: string; category: "food" | "lodging" | "transport" | "other"; total: number; days_covered: number }) => Promise<LReceipt | null>;
-  takeBridge: (amount?: number) => Promise<number | null>;
+  takeBridge: (amount?: number) => Promise<{ ref: string | null } | null>;
   helpCircle: (fromName: string, amount: number) => Promise<void>;
   mortgagePause: () => Promise<void>;
-  billAction: (billId: string, action: "pay" | "move") => Promise<void>;
+  /** Returns an error message, or null when it worked. */
+  billAction: (billId: string, action: "pay" | "move") => Promise<string | null>;
   confirmRoom: (room: string) => Promise<void>;
   scan: (room: string, phase: "before" | "after", video: File) => Promise<LScanResult>;
   compare: (room?: string) => Promise<LCompare | null>;
   removeLoss: (index: number) => Promise<void>;
   damagePhoto: (photo: File) => Promise<{ line: LDamage; quality_warnings: string[] }>;
-  receiptPhoto: (photo: File) => Promise<LReceipt>;
+  receiptPhoto: (photo: File) => Promise<LReceipt & { duplicate?: boolean }>;
   reset: () => Promise<void>;
+  checkIn: (safe: boolean, needs: string[]) => Promise<boolean>;
+  setPrivacy: (shareHardship: boolean) => Promise<void>;
+  activity: () => Promise<LActivityView | null>;
+  claimCheck: () => Promise<LClaimCheck | null>;
+  homeRecord: () => Promise<LHomeRecord | null>;
+  /** Responder portal only (signed with the staff name). */
+  staff: StaffData | null;
+  staffName: string | null;
+  reachOut: (id: string, kind: "check_in" | "bridge_offer") => Promise<boolean>;
+  assign: (id: string, to: string) => Promise<boolean>;
+  sweep: () => Promise<{ reached: number } | null>;
   addToCircle: (name: string, relation: string) => Promise<boolean>;
   requestHelp: () => Promise<string | null>;
   demo: {
-    flood: () => Promise<void>;
+    disaster: () => Promise<void>;
     delayPaycheck: (days: number) => Promise<void>;
     presetScan: (phase: "before" | "after", room?: string) => Promise<boolean>;
   };
@@ -165,8 +209,10 @@ type Live = {
 const LiveCtx = createContext<Live>(null as unknown as Live);
 export const useLive = () => useContext(LiveCtx);
 
-export function LiveProvider({ children }: { children: React.ReactNode }) {
+/** mode "family": one household's data. mode "staff": the responder ranking (signed with staffName). */
+export function LiveProvider({ children, staffName = null }: { children: React.ReactNode; staffName?: string | null }) {
   const [data, setData] = useState<LiveData | null>(null);
+  const [staffData, setStaffData] = useState<StaffData | null>(null);
   const [loading, setLoading] = useState(!!API);
   const seq = useRef(0);
 
@@ -174,14 +220,19 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     if (!API) return;
     const n = ++seq.current;
     try {
-      const d = await loadAll();
-      if (n === seq.current) setData(d);
+      if (staffName) {
+        const d = await loadStaff();
+        if (n === seq.current) setStaffData(d);
+      } else {
+        const d = await loadAll();
+        if (n === seq.current) setData(d);
+      }
     } catch {
-      if (n === seq.current) setData(null); // backend down: scenes fall back to mock data
+      if (n === seq.current) (staffName ? setStaffData(null) : setData(null)); // backend down: scenes fall back to mock data
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [staffName]);
 
   useEffect(() => {
     refresh();
@@ -232,10 +283,21 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     },
     fileClaim: async () => void (await act(() => req("POST", hh("/claim/file")))),
     addReceipt: async (r) => (await act(() => req<{ receipt: LReceipt }>("POST", hh("/receipt/manual"), r)))?.receipt ?? null,
-    takeBridge: async (amount) => (await act(() => req<{ amount: number }>("POST", hh("/bridge/disburse"), amount ? { amount } : {})))?.amount ?? null,
+    takeBridge: async (amount) => {
+      const r = await act(() => req<{ nessie_transaction_id: string | null }>("POST", hh("/bridge/disburse"), amount ? { amount } : {}));
+      return r ? { ref: r.nessie_transaction_id } : null;
+    },
     helpCircle: async (fromName, amount) => void (await act(() => req("POST", hh("/help-circle"), { from_name: fromName, amount }))),
     mortgagePause: async () => void (await act(() => req("POST", hh("/mortgage-pause")))),
-    billAction: async (billId, action) => void (await act(() => req("POST", hh(`/bills/${billId}`), { action }))),
+    billAction: async (billId, action) => {
+      try {
+        await req("POST", hh(`/bills/${billId}`), { action });
+        await refresh();
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : "That didn't go through";
+      }
+    },
     confirmRoom: async (room) => void (await act(() => req("POST", hh("/losses/review"), { confirm_all_in_room: room }))),
     scan: async (room, phase, video) => {
       const form = new FormData();
@@ -265,17 +327,29 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     receiptPhoto: async (photo) => {
       const form = new FormData();
       form.set("photo", photo);
-      const r = await req<{ receipt: LReceipt }>("POST", hh("/receipt"), undefined, form);
+      const r = await req<{ receipt: LReceipt; duplicate?: boolean }>("POST", hh("/receipt"), undefined, form);
       await refresh();
-      return r.receipt;
+      return { ...r.receipt, duplicate: r.duplicate };
     },
     reset: async () => void (await act(() => req("POST", "/demo/reset"))),
+    checkIn: async (safe, needs) => (await act(() => req("POST", hh("/check-in"), { safe, needs }))) !== null,
+    setPrivacy: async (share) => void (await act(() => req("POST", hh("/privacy"), { share_hardship: share }))),
+    activity: async () => (API ? req<LActivityView>("GET", hh("/activity")).catch(() => null) : null),
+    homeRecord: async () => (API ? req<LHomeRecord>("GET", hh("/home-record")).catch(() => null) : null),
+    claimCheck: async () => (API ? req<LClaimCheck>("GET", hh("/claim/check")).catch(() => null) : null),
+    staff: staffData,
+    staffName,
+    reachOut: async (id, kind) =>
+      (await act(() => req("POST", `/insurer/households/${id}/reach-out`, { kind }, undefined, staffName ?? ""))) !== null,
+    assign: async (id, to) =>
+      (await act(() => req("POST", `/insurer/households/${id}/assign`, { to }, undefined, staffName ?? ""))) !== null,
+    sweep: async () => act(() => req<{ reached: number }>("POST", "/insurer/sweep", undefined, undefined, staffName ?? "")),
     addToCircle: async (name, relation) => (await act(() => req("POST", hh("/circle"), { name, relation }))) !== null,
     requestHelp: async () => (await act(() => req<{ link: string }>("POST", hh("/circle/request"))))?.link ?? null,
     demo: {
-      flood: async () => void (await act(() => req("POST", "/demo/flood"))),
+      disaster: async () => void (await act(() => req("POST", "/demo/disaster"))),
       delayPaycheck: async (days) => void (await act(() => req("POST", `/demo/delay-paycheck?days=${days}`))),
-      presetScan: async (phase, room = "Living room") =>
+      presetScan: async (phase, room = "Garage") =>
         (await act(() => req("POST", `/demo/scan?phase=${phase}&room=${encodeURIComponent(room)}`))) !== null,
     },
   };
@@ -303,5 +377,12 @@ export function sceneOf(action: string) {
 export const account = (d: LiveData, key: string) => d.accounts.find((a) => a.key === key);
 
 /** URL of a video frame (proof photo) for a scanned room. */
-export const frameUrl = (room: string, phase: "before" | "after", ts: number | null | undefined) =>
-  API ? `${API}/households/${HOUSEHOLD}/frame?room=${encodeURIComponent(room)}&phase=${phase}&ts=${ts ?? 1}` : "";
+/** A real frame from the family's video. With a box: mode "crop" zooms on the item, "mark" outlines it. */
+export const frameUrl = (
+  room: string, phase: "before" | "after", ts: number | null | undefined,
+  box?: number[] | null, mode: "full" | "crop" | "mark" = "full",
+) =>
+  API
+    ? `${API}/households/${HOUSEHOLD}/frame?room=${encodeURIComponent(room)}&phase=${phase}&ts=${ts ?? 1}` +
+      (box && mode !== "full" ? `&box=${box.join(",")}&mode=${mode}` : "")
+    : "";
