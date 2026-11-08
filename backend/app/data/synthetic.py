@@ -142,7 +142,7 @@ def synthetic_households(n: int, seed: int = 42) -> list[Household]:
 
 def synthetic_atms(n: int = 120, seed: int = 7) -> list[dict]:
     rng = random.Random(seed)
-    banks = ["Capital One", "Capital One Café", "Partner"]
+    banks = ["Bank", "Credit union", "Partner"]
     atms = []
     for i in range(n):
         lat = rng.gauss(DALLAS[0] - 0.03, 0.09)
@@ -155,7 +155,7 @@ def synthetic_atms(n: int = 120, seed: int = 7) -> list[dict]:
             "hours": rng.choice(["24 hours", "6am–11pm"]), "source": "synthetic",
         })
     # guarantee one working ATM a short drive from the Garcias for the demo
-    atms.append({"id": "atm_demo", "name": "Capital One ATM – Jefferson Blvd", "lat": GARCIA_LOC[0] + 0.018,
+    atms.append({"id": "atm_demo", "name": "Bank ATM – Jefferson Blvd", "lat": GARCIA_LOC[0] + 0.018,
                  "lng": GARCIA_LOC[1] + 0.021, "working": True, "hours": "24 hours", "source": "synthetic"})
     atms.append({"id": "atm_down", "name": "Partner ATM – Davis St", "lat": GARCIA_LOC[0] + 0.004,
                  "lng": GARCIA_LOC[1] - 0.003, "working": False, "hours": "24 hours", "source": "synthetic"})

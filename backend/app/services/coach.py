@@ -73,17 +73,22 @@ def detect_intent(q: str) -> str:
 
 def _accounts_view(h: Household) -> list[dict]:
     a = h.accounts
+    cd_weeks = round(a.cd_matures_in_days / 7)
     return [
-        {"type": "Checking", "amount": a.checking, "text": f"${a.checking:,.0f} in checking"},
-        {"type": "Savings", "amount": a.savings, "text": f"${a.savings:,.0f} in savings"},
-        {"type": "CD", "amount": a.cd, "text": f"${a.cd:,.0f} CD, matures in {round(a.cd_matures_in_days / 7)} weeks"},
-        {"type": "IRA", "amount": a.ira, "text": f"${a.ira:,.0f} IRA (retirement)"},
-        {"type": "Credit card", "amount": a.credit_card_balance,
+        {"key": "checking", "type": "Checking", "amount": a.checking, "text": f"${a.checking:,.0f} in checking"},
+        {"key": "savings", "type": "Savings", "amount": a.savings, "text": f"${a.savings:,.0f} in savings"},
+        {"key": "cd", "type": "CD", "amount": a.cd, "matures_in_weeks": cd_weeks,
+         "text": f"${a.cd:,.0f} CD, matures in {cd_weeks} weeks"},
+        {"key": "ira", "type": "IRA", "amount": a.ira, "text": f"${a.ira:,.0f} IRA (retirement)"},
+        {"key": "credit_card", "type": "Credit card", "amount": a.credit_card_balance, "limit": a.credit_card_limit,
          "text": f"${a.credit_card_balance:,.0f} owed on a ${a.credit_card_limit:,.0f} card"},
-        {"type": "Auto loan", "amount": a.auto_loan_monthly, "text": f"${a.auto_loan_monthly:,.0f}/month car payment"},
-        {"type": "Personal loan", "amount": a.personal_loan_monthly,
+        {"key": "auto_loan", "type": "Auto loan", "amount": a.auto_loan_monthly, "monthly_payment": a.auto_loan_monthly,
+         "text": f"${a.auto_loan_monthly:,.0f}/month car payment"},
+        {"key": "personal_loan", "type": "Personal loan", "amount": a.personal_loan_monthly,
+         "monthly_payment": a.personal_loan_monthly,
          "text": f"${a.personal_loan_monthly:,.0f}/month personal loan" if a.personal_loan_monthly else "No personal loan"},
-        {"type": "Mortgage", "amount": a.mortgage_monthly, "text": f"${a.mortgage_monthly:,.0f}/month mortgage"},
+        {"key": "mortgage", "type": "Mortgage", "amount": a.mortgage_monthly, "monthly_payment": a.mortgage_monthly,
+         "text": f"${a.mortgage_monthly:,.0f}/month mortgage"},
     ]
 
 

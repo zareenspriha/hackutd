@@ -56,6 +56,8 @@ async def household_home(household_id: str):
         "id": h.id, "name": h.name, "disaster_mode": h.disaster_mode,
         "claim_status": c["status_line"], "documented_pct": c["documented_pct"], "owed": c["owed"]["total"],
         "checking": h.accounts.checking, "savings": h.accounts.savings,
+        "claim_filed": h.claim.filed, "expected_days_to_pay": h.claim.expected_days_to_pay,
+        "deductible": h.deductible, "weekly_grocery_spend": h.weekly_grocery_spend,
         "bridge": h.bridge.model_dump(), "next_steps": compute_next_steps(h),
     }
 

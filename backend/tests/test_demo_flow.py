@@ -73,7 +73,7 @@ def test_demo_flow(client, tmp_path):
     # Capital One
     home = client.get("/households/garcia").json()
     titles = [s["title"] for s in home["next_steps"]]
-    assert titles[0].startswith("File your claim") and "Bridge Funds" in titles[1]
+    assert titles[0].startswith("File your insurance claim") and "Bridge Funds" in titles[1]
     r = client.post("/households/garcia/bridge/disburse")
     assert r.status_code == 200 and 0 < r.json()["amount"] <= 5000
     bills = client.get("/households/garcia/bills").json()["bills"]

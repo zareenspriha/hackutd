@@ -74,6 +74,7 @@ def score(h: Household) -> Household:
     h.documented_loss = round(loss, 2)
     h.priority_score = round(sev + frag + sil, 1)
     h.priority_reasons = reasons
+    h.priority_parts = {"severity": round(sev, 1), "fragility": round(frag, 1), "silence": round(sil, 1)}
     return h
 
 
@@ -82,6 +83,8 @@ def public_view(h: Household, rank: int | None = None) -> dict:
     return {
         "id": h.id, "name": h.name, "rank": rank, "lat": h.lat, "lng": h.lng, "zip": h.zip,
         "score": h.priority_score, "reasons": h.priority_reasons,
+        "severity": h.priority_parts.get("severity", 0.0), "fragility": h.priority_parts.get("fragility", 0.0),
+        "silence": h.priority_parts.get("silence", 0.0),
         "summary": ", ".join(h.priority_reasons[:3]) or "No urgent signals",
         "claim_filed": h.claim.filed, "synthetic": h.synthetic,
     }
