@@ -151,11 +151,6 @@ export default function Circle() {
               </li>
             ))}
           </ul>
-          <div className="mt-4 flex justify-end">
-            <button onClick={() => go("lantern")} className="pill-light">
-              See the responder side <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
         </motion.div>
       }
     />

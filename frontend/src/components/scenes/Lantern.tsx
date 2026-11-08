@@ -4,7 +4,7 @@ import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import { ArrowLeft, Check, Search, Send, ShieldCheck, UserRoundCheck, Zap } from "lucide-react";
 import Logo from "../Logo";
 import { useDemo } from "../demo";
-import { EASE, useNav } from "../ui";
+import { EASE } from "../ui";
 import { syntheticHouseholds, tierOf } from "@/lib/mock";
 import type { PriorityHousehold } from "@/lib/types";
 import { useLive } from "@/lib/live";
@@ -18,9 +18,8 @@ const tierLabel: Record<Tier, string> = { urgent: "Urgent", high: "High", medium
  * Never shows balances: financial signals arrive as plain reasons and can only move a family up.
  * TODO (backend): GET /insurer/households?tier=&silent=&zip= and /insurer/households/{id}
  */
-export default function Lantern() {
+export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOut?: () => void }) {
   const { toast } = useDemo();
-  const { go } = useNav();
   const live = useLive();
   const livePri = live.data?.priority;
   const base = useMemo<PriorityHousehold[]>(
@@ -70,9 +69,12 @@ export default function Lantern() {
     <div className="flex h-full flex-col px-8 pb-6 pt-5 text-ivory">
       <div className="mb-5 flex items-center justify-between">
         <span className="invert"><Logo width={96} animate={false} id="lantern-logo" /></span>
-        <button onClick={() => go("today")} className="flex h-10 items-center gap-2 rounded-full border border-ivory/20 px-4 text-sm text-cream-2 hover:bg-raised">
-          <ArrowLeft className="h-4 w-4" strokeWidth={1.75} /> Family app
-        </button>
+        <div className="flex items-center gap-3">
+          <span className="rounded-full bg-raised px-3 py-1.5 text-xs text-ivory">Insurer staff · {staff ?? "Responder"}</span>
+          <button onClick={onSignOut} className="flex h-10 items-center gap-2 rounded-full border border-ivory/20 px-4 text-sm text-cream-2 hover:bg-raised">
+            <ArrowLeft className="h-4 w-4" strokeWidth={1.75} /> Sign out
+          </button>
+        </div>
       </div>
       {/* top bar */}
       <div className="flex items-end justify-between gap-6">

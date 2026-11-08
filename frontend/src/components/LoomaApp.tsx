@@ -2,14 +2,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import {
-  ArrowLeft, ArrowRight, Check, ArrowLeftRight, CalendarClock, FileCheck2, HandCoins, HandHeart, Home, MessageCircle, Radar, ScanLine, Sparkles, Wallet,
+  LogOut, ArrowLeft, ArrowRight, Check, ArrowLeftRight, CalendarClock, FileCheck2, HandCoins, HandHeart, Home, MessageCircle, ScanLine, Sparkles, Wallet,
 } from "lucide-react";
 import Logo from "./Logo";
-import Cat from "./Cat";
 import { NavCtx, SCENES, type SceneId } from "./ui";
 import { PILLARS, pillarOf } from "./pillars";
 import { DemoProvider, useDemo } from "./demo";
 import { LiveProvider } from "@/lib/live";
+import { AuthProvider, initials, useAuth } from "@/lib/auth";
+import AuthModal, { type AuthMode } from "./AuthModal";
 import Landing from "./scenes/Title";
 import Today from "./scenes/Today";
 import Scan from "./scenes/Scan";
@@ -21,38 +22,48 @@ import Circle from "./scenes/Circle";
 import Ask from "./scenes/Ask";
 import Picture from "./scenes/Picture";
 import Wait from "./scenes/Wait";
-import Lantern from "./scenes/Lantern";
 
 const view: Record<SceneId, React.ComponentType> = {
-  title: Landing, today: Today, scan: Scan, compare: Compare, claim: Claim, fund: Fund, bills: Bills,
-  circle: Circle, ask: Ask, picture: Picture, wait: Wait, lantern: Lantern,
+  title: Today, today: Today, scan: Scan, compare: Compare, claim: Claim, fund: Fund, bills: Bills,
+  circle: Circle, ask: Ask, picture: Picture, wait: Wait,
 };
 
 
 export default function LoomaApp() {
   return (
     <MotionConfig reducedMotion="user">
-      <LiveProvider>
-        <DemoProvider>
-          <Shell />
-        </DemoProvider>
-      </LiveProvider>
+      <AuthProvider>
+        <LiveProvider>
+          <DemoProvider>
+            <Shell />
+          </DemoProvider>
+        </LiveProvider>
+      </AuthProvider>
     </MotionConfig>
   );
 }
 
 function Shell() {
   const { s: demo } = useDemo();
+  const { user, ready, logOut } = useAuth();
   const [scene, setScene] = useState<SceneId>("title");
+  const [auth, setAuth] = useState<AuthMode | null>(null);
+  const [after, setAfter] = useState<SceneId>("today");
   const [dir, setDir] = useState(1);
 
   const go = useCallback(
     (s: SceneId) => {
+      // Every screen after the landing page is personal: sign in first.
+      if (s !== "title" && !user) {
+        setAfter(s);
+        setAuth("signup");
+        return;
+      }
       setDir(SCENES.indexOf(s) >= SCENES.indexOf(scene) ? 1 : -1);
       setScene(s);
       history.replaceState(null, "", s === "title" ? "/" : `#${s}`);
     },
-    [scene],
+    [scene, user],
   );
   const next = useCallback(() => go(SCENES[Math.min(SCENES.indexOf(scene) + 1, SCENES.length - 1)]), [go, scene]);
   const back = useCallback(() => go(SCENES[Math.max(SCENES.indexOf(scene) - 1, 0)]), [go, scene]);
@@ -74,8 +85,13 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [next, back]);
 
+  // Deep links (/#fund) only open once signed in.
+  useEffect(() => {
+    if (ready && !user && scene !== "title") setScene("title");
+  }, [ready, user, scene]);
+
   const View = view[scene];
-  const surface = scene === "title" ? "landing" : scene === "lantern" ? "lantern" : "app";
+  const surface = scene === "title" || !user ? "landing" : "app";
 
   return (
     <NavCtx.Provider value={{ scene, go, next, back }}>
@@ -83,13 +99,7 @@ function Shell() {
         <AnimatePresence mode="wait" initial={false}>
           {surface === "landing" && (
             <motion.div key="landing" className="absolute inset-0" exit={{ opacity: 0, scale: 0.98, filter: "blur(6px)" }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}>
-              <Landing />
-            </motion.div>
-          )}
-
-          {surface === "lantern" && (
-            <motion.div key="lantern" className="dark absolute inset-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.45 }}>
-              <Lantern />
+              <Landing onAuth={setAuth} />
             </motion.div>
           )}
 
@@ -113,9 +123,9 @@ function Shell() {
                   <Logo width={104} animate={false} id="side-logo" />
                 </button>
                 <div className="mt-4 flex items-center gap-3 rounded-[16px] bg-navy/50 px-3 py-2.5">
-                  <Cat size={22} light blink={false} />
-                  <div className="leading-tight">
-                    <p className="text-sm text-cream-2">Garcia household</p>
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cream-2 text-xs font-medium text-navy">{user ? initials(user) : ""}</span>
+                  <div className="min-w-0 leading-tight">
+                    <p className="truncate text-sm text-cream-2">{user?.name}</p>
                     <p className="text-xs text-ivory/70">Day 2 · Claim {demo.claimFiled ? "filed" : "pending"}</p>
                   </div>
                 </div>
@@ -155,8 +165,8 @@ function Shell() {
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber" /> Disaster Mode is on. Late fees are paused.
                   </button>
                 )}
-                <button onClick={() => go("lantern")} className="flex h-10 items-center gap-3 rounded-[12px] px-3 text-[14px] text-ivory/75 hover:bg-ivory/5 hover:text-cream-2">
-                  <Radar className="h-[18px] w-[18px]" strokeWidth={1.75} /> Responder view
+                <button onClick={() => (logOut(), go("title"))} className="flex h-10 items-center gap-3 rounded-[12px] px-3 text-[14px] text-ivory/75 hover:bg-ivory/5 hover:text-cream-2">
+                  <LogOut className="h-[18px] w-[18px]" strokeWidth={1.75} /> Log out
                 </button>
                 <p className="px-3 pt-2 text-[11px] text-ivory/40">← → to move · Shift+D for demo</p>
               </motion.aside>
@@ -188,6 +198,16 @@ function Shell() {
             </motion.div>
           )}
         </AnimatePresence>
+        <AuthModal
+          mode={auth}
+          onClose={() => setAuth(null)}
+          onDone={() => {
+            setAuth(null);
+            setDir(1);
+            setScene(after);
+            history.replaceState(null, "", `#${after}`);
+          }}
+        />
       </div>
     </NavCtx.Provider>
   );
