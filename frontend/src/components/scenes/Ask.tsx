@@ -5,7 +5,7 @@ import { ArrowRight, ArrowUp, ShieldAlert, ShieldCheck } from "lucide-react";
 import Cat from "../Cat";
 import { Assumptions, Rise, Stage, useNav } from "../ui";
 import { api } from "@/lib/api";
-import { useLive } from "@/lib/live";
+import { useLive, type LTurn } from "@/lib/live";
 
 type Rich =
   | { kind: "ladder"; rows: { label: string; amount: string; use: boolean }[] }
@@ -13,7 +13,10 @@ type Rich =
   | { kind: "simulate" }
   | { kind: "picture" }
   | { kind: "safety"; rows: string[] };
-type Msg = { role: "user" | "looma"; text: string; rich?: Rich; next?: string; assumptions?: string[]; checked?: boolean };
+type Msg = {
+  role: "user" | "looma"; text: string; rich?: Rich; next?: string; nextId?: string; assumptions?: string[]; checked?: boolean;
+  ai?: boolean; actions?: { label: string; go: string }[]; followUps?: string[];
+};
 
 // Scripted answers for the demo. TODO (coach): POST /households/{id}/coach returns these shapes.
 const scripted: Record<string, Omit<Msg, "role">> = {
@@ -56,8 +59,13 @@ const scripted: Record<string, Omit<Msg, "role">> = {
   },
 };
 
+/** "File your insurance claim today" -> "How do I file my insurance claim today?" */
+export const howTo = (title: string) =>
+  `How do I ${title.charAt(0).toLowerCase()}${title.slice(1).replace(/\.$/, "").replace(/\byour\b/g, "my")}?`;
+
 export default function Ask() {
   const live = useLive();
+  const { go } = useNav();
   const [msgs, setMsgs] = useState<Msg[]>([
     { role: "looma", text: "I can see your accounts, your claim, and what's coming in. Ask me anything. No question is too small." },
   ]);
@@ -69,28 +77,50 @@ export default function Ask() {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   }, [msgs, typing]);
 
-  async function send(q: string) {
-    if (!q.trim()) return;
+  async function send(q: string, stepId?: string) {
+    if (!q.trim() || typing) return;
+    const history: LTurn[] = msgs.slice(1).map((m) => ({ role: m.role, text: m.text }));
     setMsgs((m) => [...m, { role: "user", text: q }]);
     setInput("");
     setTyping(true);
-    const known = scripted[q];
-    // Live: the real coach answers everything (numbers from the engines, wording from Gemini).
-    const fromCoach = live.data ? await live.coach(q) : null;
+    // Live: the real coach answers everything (numbers from the engines, wording from Gemini, earlier turns for context).
+    const fromCoach = live.data ? await live.coach(q, { history, stepId }) : null;
     const reply: Omit<Msg, "role"> = fromCoach
       ? {
           text: fromCoach.answer.replace(/\s*Next step: .*$/, ""), // shown separately below the answer
           rich: fromCoach.card ?? undefined,
           next: fromCoach.next_step?.title,
+          nextId: fromCoach.next_step?.id,
           assumptions: fromCoach.assumptions.length ? fromCoach.assumptions.slice(0, 3) : undefined,
           checked: fromCoach.numbers_checked,
+          ai: fromCoach.ai_wording_used,
+          actions: fromCoach.actions,
+          followUps: fromCoach.follow_ups,
         }
-      : known ?? (await api.coach("garcia", q).then((r) => ({ text: r.answer, next: r.nextStep })));
+      : live.data
+        ? { text: "I couldn't reach looma just now. Try again in a moment." }
+        : scripted[q] ?? (await api.coach("garcia", q).then((r) => ({ text: r.answer, next: r.nextStep })));
+    // offline demo: a short pause so the scripted answer feels typed
     setTimeout(() => {
       setTyping(false);
       setMsgs((m) => [...m, { role: "looma", ...reply }]);
-    }, 1100);
+    }, fromCoach ? 0 : 900);
   }
+
+  // A question handed over from another screen ("Ask how" on Today, "While you wait" on the safety card).
+  useEffect(() => {
+    let handed: { q: string; stepId?: string } | null = null;
+    try {
+      handed = JSON.parse(sessionStorage.getItem("looma.ask") ?? "null");
+      sessionStorage.removeItem("looma.ask");
+    } catch {
+      /* storage blocked */
+    }
+    if (handed?.q) send(handed.q, handed.stepId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const askStep = (title: string, id?: string) => send(howTo(title), id);
+  const lastLooma = msgs.map((m) => m.role).lastIndexOf("looma");
 
   const asked = new Set(msgs.filter((m) => m.role === "user").map((m) => m.text));
   const chips = Object.keys(scripted).filter((q) => !asked.has(q));
@@ -147,16 +177,35 @@ export default function Ask() {
                       <p className="text-[16px] leading-relaxed text-midnight"><Headline text={m.text} /></p>
                       {m.rich && <RichCard r={m.rich} />}
                       {m.assumptions && <Assumptions items={m.assumptions} />}
+                      {m.actions && m.actions.length > 0 && (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {m.actions.map((a) => (
+                            <button key={a.go + a.label} onClick={() => go(a.go as Parameters<typeof go>[0])} className="pill-dark h-10 px-4 text-sm">
+                              {a.label} <ArrowRight className="h-4 w-4" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {m.checked && (
                         <p className="mt-3 flex items-center gap-1.5 text-xs text-dusty-deep">
-                          <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.75} /> Every number checked against your accounts
+                          <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.75} />
+                          {m.ai ? "Worded by Gemini · every number comes from your accounts" : "Every number comes from your accounts"}
                         </p>
                       )}
                       {m.next && (
-                        <p className="mt-4 border-t border-ivory pt-3 text-[15px] text-midnight">
-                          <span className="eyebrow mr-2">Next</span>
-                          {m.next}
-                        </p>
+                        <button onClick={() => askStep(m.next!, m.nextId)} disabled={typing}
+                          className="group mt-4 flex w-full items-center gap-2 border-t border-ivory pt-3 text-left text-[15px] text-midnight">
+                          <span className="eyebrow">Next</span>
+                          <span className="flex-1">{m.next}</span>
+                          <span className="flex items-center gap-1 text-sm text-dusty-deep group-hover:text-midnight">How? <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" /></span>
+                        </button>
+                      )}
+                      {i === lastLooma && m.followUps && m.followUps.length > 0 && !typing && (
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {m.followUps.filter((f) => !asked.has(f)).map((f) => (
+                            <button key={f} onClick={() => send(f)} className="rounded-full border border-midnight/15 px-3 py-1.5 text-sm text-midnight hover:bg-white/60">{f}</button>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </>

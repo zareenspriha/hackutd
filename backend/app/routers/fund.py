@@ -194,15 +194,31 @@ async def add_to_circle(household_id: str, body: InviteIn):
     return _circle_view(h)
 
 
+class AskIn(BaseModel):
+    names: list[str] = Field(default_factory=list, max_length=20, description="Who to ask (empty = everyone not asked yet)")
+    amount: float | None = Field(None, gt=0, le=5000)
+
+
 @router.post("/circle/request")
-async def request_help(household_id: str):
-    """Share a request link with everyone in the circle (marks them as asked)."""
+async def request_help(household_id: str, body: AskIn | None = None):
+    """Ask specific people in the circle for help. Only the people the family picks are marked as asked."""
+    from .deps import now
+
     h = await load(household_id)
-    for m in h.circle:
-        m.invited = True
-    note(h, "You", f"Asked {len(h.circle)} people in your Help circle for help")
+    wanted = {n.lower() for n in (body.names if body else [])}
+    if wanted:
+        picked = [m for m in h.circle if m.name.lower() in wanted]
+    else:
+        picked = [m for m in h.circle if not m.invited]
+    if not picked:
+        raise HTTPException(400, "Pick someone in your circle to ask.")
+    ts = now()
+    for m in picked:
+        m.invited, m.asked_at = True, ts
+    amt = body.amount if body and body.amount else None
+    note(h, "You", f"Asked {', '.join(m.name for m in picked)} for help" + (f" (${amt:,.0f})" if amt else ""))
     await commit(h)
-    return {**_circle_view(h), "link": f"https://looma.app/help/{h.id}"}
+    return {**_circle_view(h), "asked": [m.name for m in picked], "link": f"https://looma.app/help/{h.id}"}
 
 
 @router.get("/cash-access")
@@ -226,6 +242,9 @@ async def cash_access(household_id: str, km: float = 15, limit: int = 5):
             a["distance_km"] = round(haversine_km(h.lat, h.lng, a["lat"], a["lng"]), 2)
         local = sorted(atms + local, key=lambda a: a["distance_km"])
     working = [a for a in local if a.get("working", True)][:limit]
+    for i, a in enumerate(working):
+        a["closest"] = i == 0
+        a["minutes_driving"] = max(1, round(a["distance_km"] / 40 * 60))  # ~40 km/h city driving
     down = [a for a in local if not a.get("working", True)][:3]
     return {"nearest_working": working[0] if working else None, "working": working, "out_of_service": down}
 

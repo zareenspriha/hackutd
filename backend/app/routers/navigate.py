@@ -62,13 +62,21 @@ async def what_if(household_id: str, s: Scenario = Depends(scenario)):
     }
 
 
+class Turn(BaseModel):
+    role: str = Field(pattern="^(user|looma)$")
+    text: str = Field(max_length=1000)
+
+
 class Question(BaseModel):
     question: str = Field(min_length=1, max_length=500)
+    history: list[Turn] = Field(default_factory=list, max_length=12, description="Earlier turns, for follow-ups")
+    step_id: str | None = Field(None, max_length=60, description="Explain how to do this next step")
 
 
 @router.post("/coach")
 async def coach(household_id: str, body: Question, s: Scenario = Depends(scenario)):
-    return await ask(await load(household_id), body.question, s)
+    return await ask(await load(household_id), body.question, s,
+                     history=[t.model_dump() for t in body.history], step_id=body.step_id)
 
 
 @router.get("/coach/call-script/mortgage")

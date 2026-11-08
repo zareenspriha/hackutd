@@ -74,7 +74,11 @@ def claim_summary(h: Household) -> dict:
         "owed": owed,
         "documented": documented,
         "documented_pct": pct,
-        "status_line": f"Owed to you: ${owed['total']:,.0f}. Documented: {pct}%.",
+        "deductible": h.deductible,
+        # what insurance should actually send: claim value minus the deductible (policy limits vary)
+        "estimated_payout": round(max(0.0, owed["total"] - h.deductible), 2),
+        "status_line": f"Your claim is worth ${owed['total']:,.0f}. After your ${h.deductible:,.0f} deductible, "
+                       f"insurance should pay about ${max(0.0, owed['total'] - h.deductible):,.0f}. Documented: {pct}%.",
         "missing": missing_pieces(h),
         "filed": h.claim.filed,
         "expected_days_to_pay": h.claim.expected_days_to_pay,

@@ -25,7 +25,7 @@ Built at **HackUTD 2026**.
 - **Recovery Priority (lantern):** the responder view ranks thousands of households by financial urgency so adjusters and Bridge Funds reach the most urgent first. Scored on loss severity (40), financial fragility (30, opt-in) and silence (30: no claim filed, no contact, unanswered outreach). Scores only go up, never down, and responders see reasons, never balances.
 
 ### fund it (Capital One, on Nessie)
-- **Bridge Funds:** a documented claim unlocks cash in minutes (the lesser of 40% of documented losses or 60 days of essential spending, capped at $5,000), repaid automatically when the insurance payout lands.
+- **Bridge Funds:** a filed claim with verified proof unlocks cash in minutes. The limit is the lowest of 40% of verified losses (confirmed items seen in a before scan, with normal values), 60 days of essential spending, half of the expected payout after the deductible, and $5,000. It is drawn in parts, every draw carries a bank reference, and it is repaid automatically when the insurance payout lands.
 - **Disaster Mode / bills:** labels every bill due before the claim pays as *pay now*, *move* or *call about*, pauses late fees, and sorts spending into essential vs. can-wait.
 - **Help Circle:** family and friends send money through Nessie P2P transfers.
 - **Cash Access:** the nearest working ATM, skipping ones knocked out in the disaster zone.

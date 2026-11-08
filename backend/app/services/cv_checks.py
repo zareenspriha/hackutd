@@ -28,6 +28,8 @@ def _frames(path: str, every_s: float = 1.0, max_frames: int = 60):
     if not cap.isOpened():
         return
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    if not 1 <= fps <= 120:  # browser-recorded webm often reports 0 or 1000 fps
+        fps = 30.0
     i = n = 0
     next_ts = 0.0
     try:
