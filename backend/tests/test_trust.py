@@ -212,3 +212,17 @@ def test_messages_can_start_over(c):
     assert c.get("/households/garcia/messages").json()["messages"]
     c.delete("/households/garcia/messages")
     assert c.get("/households/garcia/messages").json()["messages"] == []
+
+
+def test_fresh_start_puts_the_demo_back_to_day_one(c):
+    score0 = c.get("/insurer/households", params={"limit": 1}).json()["households"][0]
+    c.post("/households/garcia/check-in", json={"safe": False, "needs": ["shelter"]})
+    c.post("/households/garcia/claim/file")
+    c.post("/households/garcia/bridge/disburse", json={"amount": 300})
+    c.post("/insurer/sweep", headers={"X-Staff": "Jordan"})
+    c.post("/demo/fresh")
+    h = c.get("/households/garcia").json()
+    assert not h["claim_filed"] and h["check_in"] is None and not h["messages"] and h["checking"] == 640
+    top = c.get("/insurer/households", params={"limit": 1}).json()["households"][0]
+    assert top["id"] == "garcia" and top["score"] == score0["score"]
+    assert c.get("/insurer/summary").json()["coverage_pct"] < 100  # sweep undone

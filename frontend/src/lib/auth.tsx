@@ -38,9 +38,13 @@ const write = (u: User | null) => {
   }
 };
 
-/** Demo: every sign-in (family or responder) starts the conversation over, so the live demo can run again and again. */
-export function clearDemoMessages() {
-  if (API) fetch(`${API}/households/${HOUSEHOLD}/messages`, { method: "DELETE" }).catch(() => {});
+/** Demo: every sign-in (family or responder) starts the whole demo over, so each new person sees day one:
+ * no claim, no Bridge Funds, no card, no help request, no messages. Open screens reload when it's done. */
+export function freshDemo() {
+  if (!API) return;
+  fetch(`${API}/demo/fresh`, { method: "POST" })
+    .then(() => window.dispatchEvent(new Event("looma:fresh")))
+    .catch(() => {});
 }
 
 export const firstName = (u: User) => u.name.split(" ")[0] || "there";
@@ -69,8 +73,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value: Auth = {
     user,
     ready,
-    signUp: (name, email) => (clearDemoMessages(), save({ name: name.trim(), email: email.trim(), household: "garcia", bankLinked: false })),
-    logIn: (email) => (clearDemoMessages(), save(read()?.email === email.trim() ? read() : { name: "Maria Garcia", email: email.trim(), household: "garcia", bankLinked: true })),
+    signUp: (name, email) => (freshDemo(), save({ name: name.trim(), email: email.trim(), household: "garcia", bankLinked: false })),
+    logIn: (email) => (freshDemo(), save(read()?.email === email.trim() ? read() : { name: "Maria Garcia", email: email.trim(), household: "garcia", bankLinked: true })),
     linkBank: () => user && save({ ...user, bankLinked: true }),
     logOut: () => save(null),
   };

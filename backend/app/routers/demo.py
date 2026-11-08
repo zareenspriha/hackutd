@@ -24,6 +24,30 @@ async def demo_reset():
     return await seed(force=True)
 
 
+@router.post("/fresh")
+async def fresh():
+    """Fast fresh start for a new person trying the demo (runs on every sign-in): the Garcias go back to
+    day one (no claim, no Bridge Funds, no card, no help request, no messages, no extra scans), and every
+    household's responder outreach is cleared. Keeps the same sandbox bank customer, so it takes a moment, not a reseed."""
+    from ..data.synthetic import garcia
+    from ..store import get_store
+
+    store = get_store()
+    old = await store.get(DEMO)
+    g = garcia()
+    if old:
+        g.nessie_customer_id, g.nessie_checking_id = old.nessie_customer_id, old.nessie_checking_id
+        g.nessie_savings_id, g.nessie_credit_id = old.nessie_savings_id, old.nessie_credit_id
+    await commit(g, activity=False)
+    others = [h for h in await store.top_priority(5000) if h.id != DEMO and (h.outreach or h.assigned_to)]
+    for h in others:
+        h.outreach, h.assigned_to = [], None
+        score(h)
+    if others:
+        await store.save_many(others)
+    return {"fresh": True, "cleared": len(others)}
+
+
 @router.post("/storm")
 async def storm():
     """Replay the storm on the responder map: clear earlier outreach and assignments so the
