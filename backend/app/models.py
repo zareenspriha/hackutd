@@ -131,6 +131,10 @@ class CheckIn(BaseModel):
     ts: str
     safe: bool
     needs: list[str] = []
+    note: str = ""  # anything responders should know ("two kids, one needs insulin")
+    place: str = "Home address on file"  # where responders should go
+    lat: float | None = None  # set when the family shares their current location
+    lng: float | None = None
 
 
 class ActivityEvent(BaseModel):
@@ -145,7 +149,8 @@ class ActivityEvent(BaseModel):
 class CircleMember(BaseModel):
     name: str
     relation: str = "family"
-    invited: bool = False  # a request link was shared with them
+    invited: bool = False  # the family asked this person for help
+    asked_at: str | None = None
 
 
 class Household(BaseModel):

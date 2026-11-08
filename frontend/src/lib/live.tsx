@@ -34,18 +34,19 @@ export type LReceipt = { merchant: string; category: string; total: number; days
 export type LClaim = {
   owed: { total: number; belongings: number; home_damage: number; extra_living_expenses: number };
   documented: number; documented_pct: number; status_line: string; missing: string[]; filed: boolean;
-  expected_days_to_pay: number; losses: LLoss[]; damage: { description: string; area: string; estimated_cost: number }[]; receipts: LReceipt[];
+  expected_days_to_pay: number; deductible?: number; estimated_payout?: number; losses: LLoss[]; damage: { description: string; area: string; estimated_cost: number }[]; receipts: LReceipt[];
 };
 export type LBridge = {
   eligible: boolean; amount: number; limit: number; drawn: number; remaining: number; disbursed: boolean; repaid: boolean; reason: string; documented_losses: number;
-  limits: { forty_pct_of_losses: number; sixty_days_essentials: number; cap: number };
+  limits: { forty_pct_of_losses: number; sixty_days_essentials: number; half_of_payout?: number; cap: number };
+  claim_filed?: boolean; held_for_review?: string[]; limited_by?: string; presets?: { label: string; amount: number }[]; rules?: string[];
 };
 export type LDay = { day: number; balance: number; events: { label: string; amount: number }[] };
 export type LForecast = {
   days: LDay[]; payout_day: number; expected_payout: number; bridge_repayment: number; tight_day: number;
   min_balance_before_payout: number; runway_days: number | null; horizon: number; assumptions: string[];
 };
-export type LAtm = { id: string; name: string; lat: number; lng: number; working: boolean; hours: string; distance_km: number };
+export type LAtm = { id: string; name: string; lat: number; lng: number; working: boolean; hours: string; distance_km: number; closest?: boolean; minutes_driving?: number };
 export type LCash = { nearest_working: LAtm | null; working: LAtm[]; out_of_service: LAtm[] };
 export type LPriority = {
   id: string; name: string; rank: number; lat: number; lng: number; zip: string; score: number;
@@ -54,7 +55,7 @@ export type LPriority = {
   check_in?: LCheckIn | null; shares_hardship?: boolean;
 };
 export type LOutreach = { ts: string; by: string; kind: "check_in" | "assign" | "bridge_offer" | "sweep"; note: string };
-export type LCheckIn = { ts: string; safe: boolean; needs: string[] };
+export type LCheckIn = { ts: string; safe: boolean; needs: string[]; note?: string; place?: string; lat?: number | null; lng?: number | null };
 export type LActivity = { ts: string; actor: string; text: string; amount: number | null; bank_ref: string | null };
 export type LActivityView = {
   events: LActivity[]; messages: LOutreach[]; assigned_to: string | null; check_in: LCheckIn | null; share_hardship: boolean;
@@ -93,7 +94,17 @@ export type LCard =
   | { kind: "simulate" }
   | { kind: "picture" }
   | { kind: "safety"; rows: string[] };
-export type LCoach = { intent: string; answer: string; card: LCard | null; next_step: LNextStep | null; assumptions: string[]; numbers_checked?: boolean };
+export type LCoach = {
+  intent: string; answer: string; card: LCard | null; next_step: LNextStep | null; assumptions: string[]; numbers_checked?: boolean;
+  ai_wording_used?: boolean; actions?: { label: string; go: string }[]; follow_ups?: string[];
+};
+export type LTurn = { role: "user" | "looma"; text: string };
+export type LHelpStatus = {
+  check_in: LCheckIn | null; rank: number | null; of: number; rank_before?: number | null;
+  timeline: { id: string; label: string; done: boolean; ts: string | null; detail: string }[];
+  self_help: { need: string; label: string; text: string; go: string | null; ask: string | null }[];
+  location?: { place: string; lat: number; lng: number; zip: string };
+};
 
 export type LiveData = {
   home: LHome; accounts: LAccount[]; bills: LBill[]; health: LHealth; ladder: LRung[]; claim: LClaim;
@@ -104,7 +115,7 @@ export type Scenario = { claimDelayDays?: number; payoutPct?: number; missedWork
 
 // ---------- http ----------
 
-export type LCircleMember = { name: string; relation: string; invited: boolean; sent: number };
+export type LCircleMember = { name: string; relation: string; invited: boolean; asked_at?: string | null; sent: number };
 
 async function req<T>(method: "GET" | "POST", path: string, body?: unknown, form?: FormData, staff?: string): Promise<T> {
   if (!API) throw new Error("No API configured");
@@ -170,7 +181,7 @@ type Live = {
   loading: boolean;
   refresh: () => Promise<void>;
   forecast: (s: Scenario) => Promise<LForecast | null>;
-  coach: (question: string) => Promise<LCoach | null>;
+  coach: (question: string, opts?: { history?: LTurn[]; stepId?: string }) => Promise<LCoach | null>;
   whatIf: (s: Scenario) => Promise<{ forecast: LForecast; next_steps: LNextStep[] } | null>;
   fileClaim: () => Promise<void>;
   addReceipt: (r: { merchant: string; category: "food" | "lodging" | "transport" | "other"; total: number; days_covered: number }) => Promise<LReceipt | null>;
@@ -186,7 +197,8 @@ type Live = {
   damagePhoto: (photo: File) => Promise<{ line: LDamage; quality_warnings: string[] }>;
   receiptPhoto: (photo: File) => Promise<LReceipt & { duplicate?: boolean }>;
   reset: () => Promise<void>;
-  checkIn: (safe: boolean, needs: string[]) => Promise<boolean>;
+  checkIn: (safe: boolean, needs: string[], extra?: { note?: string; lat?: number; lng?: number }) => Promise<LHelpStatus | null>;
+  helpStatus: () => Promise<LHelpStatus | null>;
   setPrivacy: (shareHardship: boolean) => Promise<void>;
   activity: () => Promise<LActivityView | null>;
   claimCheck: () => Promise<LClaimCheck | null>;
@@ -198,7 +210,7 @@ type Live = {
   assign: (id: string, to: string) => Promise<boolean>;
   sweep: () => Promise<{ reached: number } | null>;
   addToCircle: (name: string, relation: string) => Promise<boolean>;
-  requestHelp: () => Promise<string | null>;
+  requestHelp: (names?: string[], amount?: number) => Promise<string | null>;
   demo: {
     disaster: () => Promise<void>;
     delayPaycheck: (days: number) => Promise<void>;
@@ -273,10 +285,10 @@ export function LiveProvider({ children, staffName = null }: { children: React.R
         return null;
       }
     },
-    coach: async (question) => {
+    coach: async (question, opts) => {
       if (!API) return null;
       try {
-        return await req("POST", hh("/coach"), { question });
+        return await req("POST", hh("/coach"), { question, history: opts?.history ?? [], step_id: opts?.stepId ?? null });
       } catch {
         return null;
       }
@@ -332,7 +344,8 @@ export function LiveProvider({ children, staffName = null }: { children: React.R
       return { ...r.receipt, duplicate: r.duplicate };
     },
     reset: async () => void (await act(() => req("POST", "/demo/reset"))),
-    checkIn: async (safe, needs) => (await act(() => req("POST", hh("/check-in"), { safe, needs }))) !== null,
+    checkIn: async (safe, needs, extra) => act(() => req<LHelpStatus>("POST", hh("/check-in"), { safe, needs, ...extra })),
+    helpStatus: async () => (API ? req<LHelpStatus>("GET", hh("/help-status")).catch(() => null) : null),
     setPrivacy: async (share) => void (await act(() => req("POST", hh("/privacy"), { share_hardship: share }))),
     activity: async () => (API ? req<LActivityView>("GET", hh("/activity")).catch(() => null) : null),
     homeRecord: async () => (API ? req<LHomeRecord>("GET", hh("/home-record")).catch(() => null) : null),
@@ -345,7 +358,7 @@ export function LiveProvider({ children, staffName = null }: { children: React.R
       (await act(() => req("POST", `/insurer/households/${id}/assign`, { to }, undefined, staffName ?? ""))) !== null,
     sweep: async () => act(() => req<{ reached: number }>("POST", "/insurer/sweep", undefined, undefined, staffName ?? "")),
     addToCircle: async (name, relation) => (await act(() => req("POST", hh("/circle"), { name, relation }))) !== null,
-    requestHelp: async () => (await act(() => req<{ link: string }>("POST", hh("/circle/request"))))?.link ?? null,
+    requestHelp: async (names, amount) => (await act(() => req<{ link: string }>("POST", hh("/circle/request"), { names: names ?? [], amount: amount ?? null })))?.link ?? null,
     demo: {
       disaster: async () => void (await act(() => req("POST", "/demo/disaster"))),
       delayPaycheck: async (days) => void (await act(() => req("POST", `/demo/delay-paycheck?days=${days}`))),

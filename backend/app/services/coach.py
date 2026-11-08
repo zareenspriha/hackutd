@@ -25,7 +25,7 @@ DEFAULT_COSTS = {  # (cost, label, essential) when the question has no dollar am
 }
 
 
-def parse_afford(q: str) -> tuple[float, str, bool, list[str]]:
+def parse_afford(q: str, nightly: float = HOTEL_PER_NIGHT) -> tuple[float, str, bool, list[str]]:
     ql = q.lower()
     assumptions: list[str] = []
     amount = None
@@ -39,10 +39,10 @@ def parse_afford(q: str) -> tuple[float, str, bool, list[str]]:
             word = {"a": 1, "one": 1, "two": 2, "three": 3, "four": 4}
             n = int(mm.group(1)) if mm.group(1).isdigit() else word[mm.group(1)]
             nights = n * 7 if mm.group(2) == "week" else n
-        rate = amount if amount and amount < 500 else HOTEL_PER_NIGHT
+        rate = amount if amount and amount < 500 else nightly
         cost = amount if amount and amount >= 500 else rate * nights
         if not amount:
-            assumptions.append(f"Hotel at about ${HOTEL_PER_NIGHT:,.0f} a night")
+            assumptions.append(f"Hotel at your current rate, ${nightly:,.0f} a night")
         return cost, f"A hotel for {nights} nights", True, assumptions
     for key, (cost, label, essential) in DEFAULT_COSTS.items():
         if key in ql:
@@ -158,28 +158,109 @@ def _accounts_view(h: Household) -> list[dict]:
     ]
 
 
-async def ask(h: Household, question: str, s: Scenario | None = None) -> dict:
+FOLLOW_UPS = {
+    "afford": ["Where should that money come from?", "What if my claim takes six weeks?"],
+    "vacation": ["What if my claim takes six weeks?", "What do I have?"],
+    "what_if": ["Where should I get money first?", "Which bills can wait?"],
+    "have": ["Where should I get money first?", "Can I afford a hotel for two weeks?"],
+    "where": ["Can I afford a hotel for two weeks?", "Which bills can wait?"],
+    "bills": ["What if my claim takes six weeks?", "Where should I get money first?"],
+    "claim": ["What's still missing on my claim?", "What do I have?"],
+    "scam": ["What should I do next?"],
+    "sell": ["What do I have?", "What if my claim takes six weeks?"],
+    "next": ["What do I have?", "What if my claim takes six weeks?"],
+    "step": ["What should I do after that?", "What do I have?"],
+}
+STEP_SCREENS = {"file_claim": "claim", "unlock_bridge": "fund", "mortgage_pause": "bills"}
+
+
+def _step_detail(h: Household, st: dict, fc: dict) -> tuple[str, dict, list[dict]]:
+    """How to do one next step, with our own numbers and a button to the right screen."""
+    sid = st["id"]
+    if sid == "file_claim":
+        c = claim_summary(h)
+        b = available_bridge(h) or 0
+        from ..engine.bridge import bridge_offer
+        lim = bridge_offer(h)["limit"]
+        text = (f"Open My claim and tap File. Your claim is worth ${c['owed']['total']:,.0f}; after your "
+                f"${h.deductible:,.0f} deductible, insurance should pay about ${c['estimated_payout']:,.0f}."
+                + (f" Filing also unlocks up to ${lim:,.0f} in Bridge Funds." if lim >= 1 and not b else ""))
+        return text, {"claim": c["owed"], "estimated_payout": c["estimated_payout"], "bridge_limit": lim}, [{"label": "Open my claim", "go": "claim"}]
+    if sid == "unlock_bridge":
+        from ..engine.bridge import bridge_offer
+        o = bridge_offer(h)
+        text = (f"Pick how much you need now, up to ${o['remaining']:,.0f}. It lands in checking in minutes and is repaid "
+                f"from your insurance payout. No interest. The limit is set by {o['limited_by']}.")
+        return text, {"bridge": {k: o[k] for k in ("remaining", "limit", "limits")}}, [{"label": "Open Bridge Funds", "go": "fund"}]
+    if sid == "mortgage_pause":
+        m = h.accounts.mortgage_monthly
+        text = (f"Call your lender and ask for a disaster payment pause. It frees ${m:,.0f} this month. Ask: is it reported "
+                "to credit bureaus, are late fees waived, and how are paused payments repaid?")
+        return text, {"mortgage_monthly": m}, [{"label": "See my bills", "go": "bills"}]
+    if sid.startswith("rescan_"):
+        room = sid.removeprefix("rescan_")
+        return (f"Walk the {room} slowly for 30 seconds on the same path as your home record. looma lists what changed.",
+                {"room": room}, [{"label": f"Scan the {room}", "go": "scan"}])
+    if sid.startswith("pay_"):
+        b = next((x for x in h.bills if x.id == sid.removeprefix("pay_")), None)
+        if b:
+            left = h.accounts.checking - b.amount
+            return (f"Pay {b.payee} ${b.amount:,.0f} from checking. You'd have ${left:,.0f} left in checking.",
+                    {"bill": b.model_dump(), "checking_after": left}, [{"label": "Open bills", "go": "bills"}])
+    return st["why"], {"step": st}, []
+
+
+def _resolve_follow_up(question: str, history: list[dict]) -> str:
+    """'What about $300?' after a trip question: carry the earlier topic forward."""
+    if detect_intent(question) != "next" or not _amounts(question):
+        return question
+    for turn in reversed(history):
+        if turn.get("role") == "user" and detect_intent(turn.get("text", "")) not in ("next", "scam"):
+            prev = re.sub(r"\$\s?[\d,]+(?:\.\d+)?\s*k?", "", turn["text"])
+            return f"{prev.rstrip('?. ')} {question}"
+    return question
+
+
+async def ask(h: Household, question: str, s: Scenario | None = None, history: list[dict] | None = None,
+              step_id: str | None = None) -> dict:
     s = s or Scenario()
+    history = (history or [])[-8:]
     fc = run_forecast(h, s)
     steps = compute_next_steps(h, s, fc, top_n=3)
     next_step = steps[0] if steps else None
-    intent = detect_intent(question)
+    question = _resolve_follow_up(question, history)
+    picked = next((x for x in compute_next_steps(h, s, fc, top_n=10) if x["id"] == step_id), None) if step_id else None
+    intent = "step" if picked else detect_intent(question)
+    actions: list[dict] = []
     facts: dict = {}
     card: dict | None = None
     assumptions = list(fc["assumptions"])
 
-    if intent == "afford":
-        cost, label, essential, extra = parse_afford(question)
+    if intent == "step":
+        text, facts, actions = _step_detail(h, picked, fc)
+        later = [x for x in steps if x["id"] != picked["id"]]
+        next_step = later[0] if later else None
+    elif intent == "afford":
+        cost, label, essential, extra = parse_afford(question, h.displaced_nightly_cost or HOTEL_PER_NIGHT)
         assumptions = extra + assumptions
         if cost <= 0:
             text = "How much does it cost? Try: 'Can I afford $600 for a hotel this week?'"
         else:
             r = can_afford(h, cost, label, essential, s)
             facts = r
-            rows = [{"label": p["source"], "amount": f"${p['amount']:,.0f}", "use": True} for p in r["funding_plan"]]
+            rows = [{"label": p["source"] + (" (if approved)" if p["rank"] == 3 else ""), "amount": f"${p['amount']:,.0f}", "use": True}
+                    for p in r["funding_plan"]]
             rows += [{"label": "CD", "amount": "protected", "use": False}, {"label": "IRA", "amount": "protected", "use": False}]
             card = {"kind": "ladder", "rows": rows}
-            if r["affordable"]:
+            needs_ask = any(p["rank"] == 3 for p in r["funding_plan"])  # money that only exists if the lender says yes
+            from ..engine.bridge import bridge_offer
+            locked_bridge = bridge_offer(h)["limit"] if not h.claim.filed else 0
+            if r["affordable"] and needs_ask:
+                text = (f"Only if your lender agrees to a disaster pause. {label} costs about ${cost:,.0f}, and your checking "
+                        "is already needed for bills before the claim pays."
+                        + (f" Filing your claim unlocks up to ${locked_bridge:,.0f} in Bridge Funds, which would cover it."
+                           if locked_bridge >= cost else "") + " Leave your CD and IRA alone.")
+            elif r["affordable"]:
                 parts = [f"${p['amount']:,.0f} from {p['source'].lower()}" for p in r["funding_plan"]]
                 text = (f"Yes. {label} costs about ${cost:,.0f}. Pay for it with " + ", then ".join(parts)
                         + ". Leave your CD and IRA alone.")
@@ -188,9 +269,11 @@ async def ask(h: Household, question: str, s: Scenario | None = None) -> dict:
                         "without touching your CD or IRA.")
     elif intent == "vacation":
         cost, _, _, extra = parse_afford(question)
-        if cost <= 0:
-            cost = 600.0
-            extra = ["A short trip costs about $600"]
+        if cost <= 0:  # never guess a price: ask
+            return {"intent": "vacation", "answer": "Happy to check. About how much would the trip cost?",
+                    "draft": "", "facts": {}, "card": None, "numbers_checked": True, "ai_wording_used": False,
+                    "assumptions": [], "next_step": None, "next_steps": steps, "actions": [],
+                    "follow_ups": ["Can I take a $300 trip?", "Can I take a $600 trip?", "Can I take a $1,000 trip?"]}
         assumptions = extra + assumptions
         # Bridge Funds are for essentials, so a trip has to fit without them.
         cushion = h.weekly_essential_spend * 2
@@ -284,8 +367,10 @@ async def ask(h: Household, question: str, s: Scenario | None = None) -> dict:
         facts = {"next_steps": steps}
         text = ("Here's what I'd do first: " + steps[0]["title"].rstrip(".") + ".") if steps else "You're on track. Nothing urgent right now."
 
+    convo = " | ".join(f"{t.get('role')}: {str(t.get('text', ''))[:200]}" for t in history[-4:])
     wording = await get_gemini().write(
-        "Answer the family's question: " + question, {"draft_answer": text, "facts": facts}, fallback=text
+        ("Earlier in this chat: " + convo + "\n" if convo else "") + "Answer the family's question: " + question,
+        {"draft_answer": text, "facts": facts}, fallback=text,
     )
     # Number guard: every dollar amount in the AI's wording must already be in our own math.
     verified = _numbers_ok(wording, text, facts)
@@ -294,10 +379,11 @@ async def ask(h: Household, question: str, s: Scenario | None = None) -> dict:
     # the one next step is added by code after Gemini, so it can never be dropped or changed
     if intent == "scam":
         next_step = None  # a safety answer ends with the safety step, not a to-do
-    if next_step and intent != "next":
+    if next_step and intent not in ("next", "step"):
         tail = f" Next step: {next_step['title']}."
         text += tail
         wording = wording.rstrip() + tail
     return {"intent": intent, "answer": wording, "draft": text, "facts": facts, "card": card, "numbers_checked": True,
             "ai_wording_used": verified and wording != text,
-            "assumptions": [] if intent == "scam" else assumptions, "next_step": next_step, "next_steps": steps}
+            "assumptions": [] if intent == "scam" else assumptions, "next_step": next_step, "next_steps": steps,
+            "actions": actions, "follow_ups": FOLLOW_UPS.get(intent, [])}

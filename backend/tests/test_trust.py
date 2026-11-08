@@ -82,6 +82,7 @@ def test_coach_spots_scams_and_never_invents_numbers(c):
 
 
 def test_money_moves_carry_a_bank_reference(c):
+    c.post("/households/garcia/claim/file")
     r = c.post("/households/garcia/bridge/disburse", json={"amount": 500}).json()
     assert r["nessie_transaction_id"]
     ev = c.get("/households/garcia/activity").json()["events"][0]
@@ -125,3 +126,42 @@ def test_proof_frames_skip_black_frames_and_crop(tmp_path):
     jpg = cv_checks.frame_at(path, 0.0, [100, 100, 600, 600], "crop")
     img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
     assert img.shape[:2] == (320, 320) and img.mean() > 30
+
+
+def test_bridge_funds_safety_rules(c):
+    o = c.get("/households/garcia/bridge").json()
+    assert not o["eligible"] and "File your claim" in o["reason"]
+    c.post("/households/garcia/claim/file")
+    o = c.get("/households/garcia/bridge").json()
+    assert o["eligible"] and o["limit"] <= o["limits"]["half_of_payout"] and o["limit"] <= 5000
+    assert o["presets"][-1]["label"] == "Max"
+    r = c.post("/households/garcia/bridge/disburse", json={"amount": 999999}).json()
+    assert r["drawn"] == o["limit"]  # never more than the limit
+
+
+def test_help_request_shows_real_status(c):
+    r = c.post("/households/garcia/check-in", json={"safe": False, "needs": ["shelter", "cash"], "note": "two kids",
+                                                    "lat": 32.9, "lng": -96.8}).json()
+    assert r["rank"] and [t["done"] for t in r["timeline"]] == [True, False, False, False]
+    assert r["location"]["lat"] == 32.9 and {x["need"] for x in r["self_help"]} == {"shelter", "cash"}
+    c.get("/insurer/households/garcia", headers={"X-Staff": "Jordan"})
+    st = c.get("/households/garcia/help-status").json()
+    assert st["timeline"][1]["done"] and st["timeline"][1]["detail"] == "Jordan"
+
+
+def test_circle_asks_only_the_people_picked(c):
+    r = c.post("/households/garcia/circle/request", json={"names": ["Ana Garcia"]}).json()
+    asked = {m["name"]: m["invited"] for m in r["members"]}
+    assert asked["Ana Garcia"] and not asked["José Ramos"]
+
+
+def test_coach_explains_a_next_step_and_asks_trip_cost(c):
+    home = c.get("/households/garcia").json()
+    sid = home["next_steps"][0]["id"]
+    r = c.post("/households/garcia/coach", json={"question": "How do I do this?", "step_id": sid}).json()
+    assert r["intent"] == "step" and r["actions"] and r["follow_ups"]
+    r = c.post("/households/garcia/coach", json={"question": "Can I still take that vacation?"}).json()
+    assert "how much" in r["answer"].lower() and r["follow_ups"]
+    r = c.post("/households/garcia/coach", json={"question": "what about $300?",
+               "history": [{"role": "user", "text": "Can I still take that vacation?"}]}).json()
+    assert r["intent"] == "vacation" and "$300" in r["draft"]

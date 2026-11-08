@@ -31,6 +31,11 @@ export default function Fund() {
   const [taken, setTaken] = useState<number | null>(null);
   const [ref, setRef] = useState<string | null>(null);
   const amount = Math.min(Number(raw || 0), MAX);
+  // Locked until the safety rules pass (claim filed, verified proof). The backend enforces the same rules.
+  const locked = !!d && !d.bridge.eligible && !d.bridge.disbursed;
+  const presets: [string, number][] = d
+    ? (d.bridge.presets ?? [{ label: "Max", amount: MAX }]).map((p) => [p.label, p.amount])
+    : [["2 weeks of essentials", 840], ["Max", MAX]];
 
   function press(k: string) {
     if (k === "del") return setRaw((r) => r.slice(0, -1));
@@ -60,7 +65,15 @@ export default function Fund() {
           <p className="text-xs font-medium uppercase tracking-[0.22em] text-ivory/70">Bridge funds</p>
           <AnimatePresence mode="wait">
             <motion.div key={step} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.3, ease: EASE }}>
-              {step === "amount" && (
+              {step === "amount" && locked && (
+                <>
+                  <h1 className="mt-4 text-[52px] font-light leading-[1] tracking-[-0.03em]">Almost there. <span className="text-ivory/60">File your claim first.</span></h1>
+                  <p className="mt-5 max-w-md text-lg text-ivory/80">{d!.bridge.reason}</p>
+                  <button onClick={() => go("claim")} className="pill mt-6 bg-cream-2 text-midnight hover:bg-white">Open my claim <ArrowRight className="h-4 w-4" /></button>
+                  <div className="mt-6 max-w-md"><Assumptions dark items={d!.bridge.rules ?? []} /></div>
+                </>
+              )}
+              {step === "amount" && !locked && (
                 <>
                   <h1 className="mt-4 text-[52px] font-light leading-[1] tracking-[-0.03em]">How much do <span className="text-ivory/60">you need now?</span></h1>
                   <p className="mt-5 max-w-md text-lg text-ivory/80">
@@ -69,7 +82,11 @@ export default function Fund() {
                       : <>Your proven claim unlocks up to {usd(MAX)}. It repays itself when the insurance pays. No interest.</>}
                   </p>
                   <div className="mt-4 max-w-md"><Assumptions dark items={d
-                    ? [`40% of proven losses (${usd(d.bridge.limits.forty_pct_of_losses)})`, `60 days of essentials (${usd(d.bridge.limits.sixty_days_essentials)}), capped at ${usd(d.bridge.limits.cap)}`, "Simulated with a sandbox banking API"]
+                    ? [`40% of verified losses (${usd(d.bridge.limits.forty_pct_of_losses)})`, `60 days of essentials (${usd(d.bridge.limits.sixty_days_essentials)})`,
+                       ...(d.bridge.limits.half_of_payout != null ? [`Half of your expected payout (${usd(d.bridge.limits.half_of_payout)})`] : []),
+                       `Capped at ${usd(d.bridge.limits.cap)}. The lowest one sets your limit${d.bridge.limited_by ? `: ${d.bridge.limited_by}` : ""}`,
+                       ...(d.bridge.held_for_review?.length ? [`Waiting on an adjuster, not counted yet: ${d.bridge.held_for_review.join(", ")}`] : []),
+                       "Simulated with a sandbox banking API"]
                     : ["40% of proven losses ($6,200)", "Capped at 60 days of essentials or $5,000", "Simulated with a sandbox banking API"]} /></div>
                 </>
               )}
@@ -79,8 +96,9 @@ export default function Fund() {
                   <ol className="mt-6 space-y-3 text-lg text-ivory/85">
                     <li>1 · ${amount.toLocaleString()} lands in checking now</li>
                     <li>2 · Use it for essentials</li>
-                    <li>3 · Repaid automatically from the payout</li>
+                    <li>3 · Repaid automatically from the payout. No interest, no fees</li>
                   </ol>
+                  <p className="mt-5 max-w-md text-sm text-ivory/60">Every draw is logged with a bank reference in your activity. Real banks never ask for a fee or your PIN to release this.</p>
                 </>
               )}
               {step === "done" && (
@@ -115,10 +133,10 @@ export default function Fund() {
             {step !== "done" ? (
               <motion.div key="flow" exit={{ opacity: 0, scale: 0.96 }} transition={{ duration: 0.25 }} className="flex h-[calc(100%-40px)] flex-col">
                 <Amount value={amount} />
-                <div className="mx-auto mt-2 flex gap-2">
-                  {[["Hotel, 2 wks", 1246], ["Car + phone", 475], ["Max", MAX]].map(([l, v]) => (
-                    <button key={l as string} onClick={() => setRaw(String(v))} disabled={step !== "amount"} className={`rounded-full px-3 py-1.5 text-xs transition ${amount === v ? "bg-cream-2 text-navy" : "bg-midnight text-ivory hover:bg-raised"}`}>
-                      {l as string}
+                <div className="mx-auto mt-2 flex flex-wrap justify-center gap-2">
+                  {!locked && presets.map(([l, v]) => (
+                    <button key={l} onClick={() => setRaw(String(Math.min(v, MAX)))} disabled={step !== "amount"} title={usd(v)} className={`rounded-full px-3 py-1.5 text-xs transition ${amount === v ? "bg-cream-2 text-navy" : "bg-midnight text-ivory hover:bg-raised"}`}>
+                      {l}
                     </button>
                   ))}
                 </div>
@@ -140,7 +158,7 @@ export default function Fund() {
                         )}
                       </div>
                       <button disabled={!amount} onClick={() => setStep("confirm")} className="mt-3 h-[52px] w-full rounded-[14px] bg-cream-2 font-medium text-navy transition disabled:opacity-30">
-                        Continue
+                        {locked ? "Locked until your claim is filed" : "Continue"}
                       </button>
                     </>
                   ) : (

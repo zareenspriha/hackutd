@@ -63,6 +63,8 @@ export default function Claim() {
 
   const lines = d ? liveLines(d.claim) : garcias.claim.filter((c) => (c.id === "c6" ? s.scanAdded : c.id === "c4" ? s.receiptAdded : true));
   const owed = d ? d.claim.owed.total : lines.reduce((a, c) => a + c.amount, 0);
+  const deductible = d ? (d.claim.deductible ?? d.home.deductible) : 2500;
+  const payout = d?.claim.estimated_payout ?? Math.max(0, owed - deductible);
   const proven = lines.filter((c) => c.documented).reduce((a, c) => a + c.amount, 0);
   const pct = d ? d.claim.documented_pct : Math.round((proven / owed) * 100);
   // the receipt shown in the "only part of it counts" card
@@ -208,10 +210,19 @@ export default function Claim() {
               </div>
             );
           })}
-          <div className="flex items-end justify-between pt-1">
-            <span className="text-dusty-deep">Owed to you</span>
-            <CountUp value={owed} className="text-[52px] font-light leading-none text-midnight" />
+          <div className="flex items-baseline justify-between pt-1 text-[15px]">
+            <span className="text-dusty-deep">Claim value</span>
+            <span className="tnum text-navy">{usd(owed)}</span>
           </div>
+          <div className="flex items-baseline justify-between pt-1 text-[15px]">
+            <span className="text-dusty-deep">Your deductible</span>
+            <span className="tnum text-navy">−{usd(deductible)}</span>
+          </div>
+          <div className="mt-2 flex items-end justify-between border-t border-ivory pt-3">
+            <span className="text-dusty-deep">Insurance should pay about</span>
+            <CountUp value={payout} className="text-[52px] font-light leading-none text-midnight" />
+          </div>
+          <p className="mt-1 text-right text-xs text-dusty-deep">Belongings at replacement cost. Your policy&apos;s limits may change the final amount.</p>
           <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-ivory" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
             <motion.div className="h-full rounded-full bg-midnight" initial={false} animate={{ width: `${pct}%` }} transition={{ duration: 0.6, ease: EASE }} />
           </div>
@@ -220,7 +231,7 @@ export default function Claim() {
             {pct < 100 ? (
               <button onClick={() => go("compare")} className="font-medium text-midnight underline underline-offset-4">Review what&apos;s left</button>
             ) : (
-              <span className="flex items-center gap-1 text-[#3f6248]"><Check className="h-3.5 w-3.5" /> Fully documented</span>
+              <span className="flex items-center gap-1 text-[#3f6248]"><Check className="h-3.5 w-3.5" /> Every item confirmed</span>
             )}
           </div>
           {check && (

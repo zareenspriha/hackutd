@@ -9,7 +9,7 @@ import { forecast } from "@/lib/mock";
 import { usd } from "@/lib/format";
 import { useLive, type LForecast, type LiveData } from "@/lib/live";
 
-type Atm = { name: string; dist: string; open: boolean; x: number; y: number };
+type Atm = { name: string; dist: string; open: boolean; x: number; y: number; closest?: boolean; minutes?: number; hours?: string };
 
 /** Live ATMs placed around the family's location (the pulsing dot sits at 48%, 52%). */
 function liveAtms(d: LiveData): Atm[] {
@@ -21,6 +21,9 @@ function liveAtms(d: LiveData): Atm[] {
       name: a.name,
       dist: `${(a.distance_km / 1.609).toFixed(1)} mi`,
       open: a.working,
+      closest: !!a.closest,
+      minutes: a.minutes_driving,
+      hours: a.hours,
       x: Math.min(94, Math.max(6, 48 + ((a.lng - d.home.lng) / span) * 100)),
       y: Math.min(90, Math.max(10, 52 - ((a.lat - d.home.lat) / span) * 100)),
     }));
@@ -43,7 +46,10 @@ export default function Circle() {
     ? fc.days.filter((p) => p.day <= fc.payout_day)
     : forecast(6, 1, s.paycheckDelayed ? 2 : 0, s.bridgeTaken ? 2480 : 0).map((p) => ({ ...p, balance: p.balance + (s.sisterSent ? 200 : 0) }));
   const low = pts.reduce((m, p) => (p.balance < m.balance ? p : m), pts[0]);
-  const atmList = d ? liveAtms(d) : atms;
+  const atmList: Atm[] = d ? liveAtms(d) : atms.map((a, i) => ({ ...a, closest: i === 0 }));
+  const [hover, setHover] = useState<string | null>(null);
+  const ci = d?.home.check_in;
+  const youAre = d ? (ci?.lat != null ? "You · Current location (shared)" : "You · Home address on file") : "You · Hotel on Preston Rd";
   // Live: the circle and what each person sent come from the backend. Mock: the demo list.
   const members = d?.home.circle
     ? d.home.circle
@@ -55,14 +61,20 @@ export default function Circle() {
   const [newRel, setNewRel] = useState("Family");
   const ini = (n: string) => n.split(" ").filter(Boolean).slice(0, 2).map((x) => x[0]!.toUpperCase()).join("");
 
+  async function askOne(name: string) {
+    if (!d) return toast(`Asked ${name.split(" ")[0]}`);
+    const ok = await live.requestHelp([name], gap || undefined);
+    toast(ok ? `Asked ${name.split(" ")[0]}. They'll get a link to send help.` : "That didn't send. Try again.");
+  }
+
   async function share(amount: number) {
-    const link = d ? await live.requestHelp() : null;
+    const link = d ? await live.requestHelp([], amount) : null;
     try {
       if (link) await navigator.clipboard?.writeText(`I could use help covering ${usd(amount)} until our claim pays: ${link}`);
     } catch {
       /* clipboard blocked: the toast still confirms */
     }
-    toast(link ? "Request link copied. Your circle has been asked." : "Link copied. Share it with your circle.");
+    toast(link ? "Request link copied. Everyone you hadn't asked yet has been asked." : "Link copied. Share it with your circle.");
   }
 
   async function add(e: React.FormEvent) {
@@ -93,9 +105,14 @@ export default function Circle() {
               <>
                 <p className="text-xs uppercase tracking-[0.2em] text-ivory">Ask for help</p>
                 <p className="mt-2 text-[26px] font-light leading-snug">You may be {usd(gap)} short around {when} if the claim runs late.</p>
-                <button onClick={() => share(gap)} className="pill mt-4 bg-cream-2 text-midnight hover:bg-white">
-                  <Share2 className="h-4 w-4" strokeWidth={1.75} /> Share a request for {usd(gap)}
-                </button>
+                {members.some((m) => !m.invited && !m.sent) ? (
+                  <button onClick={() => share(gap)} className="pill mt-4 bg-cream-2 text-midnight hover:bg-white">
+                    <Share2 className="h-4 w-4" strokeWidth={1.75} /> Ask everyone for {usd(gap)}
+                  </button>
+                ) : (
+                  <p className="mt-3 text-sm text-ivory">Everyone in your circle has been asked.</p>
+                )}
+                <p className="mt-2 text-xs text-ivory/70">Nothing is sent until you tap. You can also ask one person below.</p>
               </>
             ) : (
               <>
@@ -118,9 +135,14 @@ export default function Circle() {
                   {p.sent ? (
                     <span className="tnum flex items-center gap-1.5 text-sm text-navy"><CheckCircle2 className="h-4 w-4 text-sage" strokeWidth={1.75} /> Sent {usd(p.sent)}</span>
                   ) : p.invited ? (
-                    <span className="flex items-center gap-1.5 text-sm text-dusty-deep"><Send className="h-3.5 w-3.5" strokeWidth={1.75} /> Asked</span>
+                    <span className="flex items-center gap-1.5 text-sm text-dusty-deep">
+                      <Send className="h-3.5 w-3.5" strokeWidth={1.75} /> Asked
+                      {"asked_at" in p && typeof p.asked_at === "string" ? ` ${new Date(p.asked_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""}
+                    </span>
                   ) : (
-                    <span className="text-sm text-dusty-deep">Not asked yet</span>
+                    <button onClick={() => askOne(p.name)} className="pill h-9 border border-midnight/20 px-4 text-sm text-midnight hover:bg-cream-2">
+                      <Send className="h-3.5 w-3.5" strokeWidth={1.75} /> Ask
+                    </button>
                   )}
                 </li>
               ))}
@@ -160,25 +182,43 @@ export default function Circle() {
               <path d="M0,40 C20,36 30,46 50,40 S80,30 100,34" stroke="#bdc4d4" strokeWidth={3} fill="none" />
               <rect x="62" y="4" width="14" height="10" rx="1" fill="#6e9277" opacity="0.25" />
             </svg>
-            {atmList.map((a) => (
-              <div key={a.name} className="absolute -translate-x-1/2 -translate-y-full" style={{ left: `${a.x}%`, top: `${a.y}%` }}>
-                <svg width="22" height="28" viewBox="0 0 22 28" aria-hidden>
-                  <path d="M11 27s9-9.2 9-15.5A9 9 0 1 0 2 11.5C2 17.8 11 27 11 27z" fill={a.open ? "#1c2e4a" : "#8a93a3"} />
-                  <circle cx="11" cy="11" r="3.2" fill="#f2f1ee" />
-                </svg>
-              </div>
-            ))}
+            {atmList.map((a) => {
+              const on = hover === a.name;
+              return (
+                <div key={a.name} className={`absolute -translate-x-1/2 -translate-y-full ${on ? "z-20" : a.closest ? "z-10" : ""}`} style={{ left: `${a.x}%`, top: `${a.y}%` }}
+                  onMouseEnter={() => setHover(a.name)} onMouseLeave={() => setHover(null)}>
+                  <button aria-label={`${a.name}, ${a.dist}${a.open ? "" : ", offline"}`} onFocus={() => setHover(a.name)} onBlur={() => setHover(null)}
+                    className={`block transition ${on ? "scale-125" : ""}`}>
+                    <svg width="22" height="28" viewBox="0 0 22 28" aria-hidden>
+                      <path d="M11 27s9-9.2 9-15.5A9 9 0 1 0 2 11.5C2 17.8 11 27 11 27z" fill={a.open ? "#1c2e4a" : "#8a93a3"} />
+                      <circle cx="11" cy="11" r="3.2" fill="#f2f1ee" />
+                    </svg>
+                  </button>
+                  {a.closest && !on && (
+                    <span className="pointer-events-none absolute bottom-full left-1/2 mb-1 -translate-x-1/2 whitespace-nowrap rounded-full bg-midnight px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-cream-2">Closest</span>
+                  )}
+                  {on && (
+                    <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 w-max max-w-[220px] -translate-x-1/2 rounded-[12px] bg-midnight px-3 py-2 text-xs text-cream-2 shadow-lg">
+                      <p className="flex items-center gap-1.5 text-[13px] font-medium">{a.name}{a.closest && <span className="rounded-full bg-cream-2/20 px-1.5 py-px text-[10px] uppercase tracking-wider">Closest</span>}</p>
+                      <p className="mt-0.5 text-ivory">{a.dist} from you{a.minutes ? ` · about ${a.minutes} min drive` : ""}</p>
+                      <p className="text-ivory">{a.open ? (a.hours ? `Working · ${a.hours}` : "Working") : "Offline after the disaster"}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             <div className="absolute" style={{ left: "48%", top: "52%" }}>
               <motion.span className="absolute -left-4 -top-4 h-8 w-8 rounded-full bg-dusty/30" animate={{ scale: [1, 1.8], opacity: [0.6, 0] }} transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }} />
               <span className="absolute -left-2 -top-2 h-4 w-4 rounded-full border-2 border-cream-2 bg-dusty" />
             </div>
-            <span className="absolute bottom-4 left-4 rounded-full bg-midnight/80 px-3 py-1 text-xs text-cream-2">You · Hotel on Preston Rd</span>
+            <span className="absolute bottom-4 left-4 rounded-full bg-midnight/80 px-3 py-1 text-xs text-cream-2">{youAre}</span>
           </div>
           <ul className="mt-4 space-y-2">
             {atmList.map((a) => (
-              <li key={a.name} className="flex items-center gap-4 rounded-[16px] border border-navy/[0.08] bg-cream px-5 py-3">
+              <li key={a.name} onMouseEnter={() => setHover(a.name)} onMouseLeave={() => setHover(null)}
+                className={`flex items-center gap-4 rounded-[16px] border px-5 py-3 transition ${hover === a.name ? "border-midnight/30 bg-cream-2" : "border-navy/[0.08] bg-cream"}`}>
                 <span className="tnum w-14 text-sm text-dusty-deep">{a.dist}</span>
-                <span className="flex-1 text-navy">{a.name}</span>
+                <span className="flex-1 text-navy">{a.name}{a.closest && <span className="ml-2 rounded-full bg-midnight px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-cream-2">Closest</span>}</span>
                 {a.open ? (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-sage/20 px-2.5 py-1 text-xs font-medium text-[#3f6248]"><CheckCircle2 className="h-3.5 w-3.5" strokeWidth={1.75} /> Open</span>
                 ) : (

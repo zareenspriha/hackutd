@@ -8,9 +8,10 @@
  */
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Eye, EyeOff, HeartHandshake, Landmark, MessageSquare, ShieldCheck, X } from "lucide-react";
-import { useLive, type LActivityView } from "@/lib/live";
+import { ArrowRight, Check, Eye, EyeOff, HeartHandshake, Landmark, LocateFixed, MapPin, MessageSquare, Phone, ShieldCheck, X } from "lucide-react";
+import { useLive, type LActivityView, type LHelpStatus } from "@/lib/live";
 import { useDemo } from "./demo";
+import { useNav } from "./ui";
 import { usd } from "@/lib/format";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -21,36 +22,122 @@ const NEEDS: [string, string][] = [
 const when = (ts: string) =>
   new Date(ts).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
+/** Hand a question to the Ask screen (it reads this when it opens). */
+export function askLooma(q: string, stepId?: string) {
+  try {
+    sessionStorage.setItem("looma.ask", JSON.stringify({ q, stepId }));
+  } catch {
+    /* storage blocked: Ask still opens */
+  }
+}
+
 export function SafetyCheck() {
   const live = useLive();
+  const { go } = useNav();
   const { toast } = useDemo();
   const ci = live.data?.home.check_in;
   const [mode, setMode] = useState<"ask" | "needs" | "done">(ci ? "done" : "ask");
   const [needs, setNeeds] = useState<string[]>([]);
+  const [noteText, setNoteText] = useState("");
+  const [where, setWhere] = useState<"home" | "here">("home");
   const [sending, setSending] = useState(false);
+  const [st, setSt] = useState<LHelpStatus | null>(null);
   useEffect(() => setMode(ci ? "done" : "ask"), [ci]);
+
+  // Live status: re-check every 8 seconds until someone has reached out.
+  const asked = !!ci && (!ci.safe || ci.needs.length > 0);
+  useEffect(() => {
+    if (!asked || mode !== "done") return;
+    let on = true;
+    const tick = () => live.helpStatus().then((x) => on && x && setSt((p) => ({ ...x, rank_before: p?.rank_before })));
+    tick();
+    const id = setInterval(tick, 8000);
+    return () => ((on = false), clearInterval(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asked, mode, ci?.ts]);
 
   if (!live.data) return null;
 
+  async function here(): Promise<{ lat: number; lng: number } | null> {
+    if (!navigator.geolocation) return null;
+    return new Promise((res) =>
+      navigator.geolocation.getCurrentPosition((p) => res({ lat: p.coords.latitude, lng: p.coords.longitude }), () => res(null), { timeout: 8000 }),
+    );
+  }
+
   async function send(safe: boolean) {
     setSending(true);
-    const ok = await live.checkIn(safe, needs);
+    let loc: { lat: number; lng: number } | null = null;
+    if (!safe && where === "here") {
+      loc = await here();
+      if (!loc) toast("Couldn't get your location. Responders will use your home address.");
+    }
+    const r = await live.checkIn(safe, safe ? [] : needs, safe ? {} : { note: noteText.trim(), ...(loc ?? {}) });
     setSending(false);
-    toast(ok ? (safe ? "Thanks. Responders know you're safe." : "Sent. Responders see this right away.") : "That didn't send. Try again.");
+    if (r) setSt(r);
+    toast(r ? (safe ? "Thanks. Responders know you're safe." : "Sent. Responders see this right away.") : "That didn't send. Try again.");
   }
+
+  const label = (n: string) => NEEDS.find((x) => x[0] === n)?.[1] ?? n;
+  const at = (ts: string | null) => (ts ? new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "");
 
   return (
     <div className="rounded-[22px] border border-navy/[0.08] bg-cream p-5">
       <AnimatePresence mode="wait">
-        {mode === "done" && ci ? (
-          <motion.div key="done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3">
-            <span className={`flex h-9 w-9 items-center justify-center rounded-full ${ci.safe && !ci.needs.length ? "bg-sage/25 text-[#3f6248]" : "bg-amber/25 text-[#7a5a1f]"}`}>
-              {ci.safe && !ci.needs.length ? <Check className="h-4 w-4" /> : <HeartHandshake className="h-4 w-4" strokeWidth={1.75} />}
-            </span>
-            <p className="flex-1 text-navy">
-              {ci.safe && !ci.needs.length ? "You told responders you're safe." : `Responders know you need ${ci.needs.length ? ci.needs.map((n) => NEEDS.find((x) => x[0] === n)?.[1].toLowerCase() ?? n).join(", ") : "help"}.`}
-            </p>
-            <button onClick={() => (setNeeds(ci.needs), setMode("ask"))} className="text-sm font-medium text-midnight underline underline-offset-4">Update</button>
+        {mode === "done" && ci && !asked ? (
+          <motion.div key="safe" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-sage/25 text-[#3f6248]"><Check className="h-4 w-4" /></span>
+            <p className="flex-1 text-navy">You told responders you&apos;re safe.</p>
+            <button onClick={() => (setNeeds([]), setMode("needs"))} className="text-sm font-medium text-midnight underline underline-offset-4">I need help</button>
+          </motion.div>
+        ) : mode === "done" && ci ? (
+          <motion.div key="status" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber/25 text-[#7a5a1f]"><HeartHandshake className="h-4 w-4" strokeWidth={1.75} /></span>
+              <div className="flex-1">
+                <p className="text-[19px] text-navy">Responders have your request for {ci.needs.length ? ci.needs.map((n) => label(n).toLowerCase()).join(", ") : "help"}.</p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-3 text-sm text-dusty-deep">
+                  {st?.rank && <span>You&apos;re <b className="font-medium text-navy">#{st.rank}</b> of {st.of.toLocaleString()} on their list{st.rank_before && st.rank_before > st.rank ? ` (was #${st.rank_before})` : ""}</span>}
+                  <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" strokeWidth={1.75} /> {ci.place ?? "Home address on file"}{st?.location ? ` · ZIP ${st.location.zip}` : ""}</span>
+                </p>
+                {ci.note && <p className="mt-1 text-sm text-dusty-deep">Your note: &ldquo;{ci.note}&rdquo;</p>}
+              </div>
+              <button onClick={() => (setNeeds(ci.needs), setNoteText(ci.note ?? ""), setMode("needs"))} className="text-sm font-medium text-midnight underline underline-offset-4">Update</button>
+            </div>
+
+            {st && (
+              <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_1fr]">
+                <ol className="space-y-2.5 rounded-[16px] bg-cream-2/70 p-4">
+                  <p className="eyebrow mb-1">What happens next</p>
+                  {st.timeline.map((t) => (
+                    <li key={t.id} className="flex gap-3">
+                      <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${t.done ? "bg-midnight text-cream-2" : "border border-dashed border-dusty"}`}>
+                        {t.done && <Check className="h-3 w-3" strokeWidth={2.5} />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className={`block text-[15px] ${t.done ? "text-navy" : "text-dusty-deep"}`}>{t.label}{t.done && t.ts ? <span className="text-dusty-deep"> · {at(t.ts)}</span> : ""}</span>
+                        {t.detail && <span className="block text-sm text-dusty-deep">{t.detail}</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                <div className="space-y-2">
+                  <p className="eyebrow">While you wait</p>
+                  {st.self_help.map((x) => (
+                    <div key={x.need} className="rounded-[14px] border border-navy/[0.08] p-3">
+                      <p className="text-sm font-medium text-navy">{x.label}</p>
+                      <p className="text-sm text-dusty-deep">{x.text}</p>
+                      {(x.go || x.ask) && (
+                        <button onClick={() => (x.ask && askLooma(x.ask), go((x.go ?? "ask") as Parameters<typeof go>[0]))} className="mt-1.5 inline-flex items-center gap-1 text-sm font-medium text-midnight underline underline-offset-4">
+                          {x.ask ? `Ask: ${x.ask}` : x.go === "fund" ? "Open Bridge Funds" : x.go === "claim" ? "Open my claim" : "See working ATMs"} <ArrowRight className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <p className="flex items-center gap-1.5 rounded-[14px] bg-clay/10 px-3 py-2 text-sm text-navy"><Phone className="h-3.5 w-3.5 text-clay" strokeWidth={1.75} /> Anyone hurt or in danger? Call 911 now.</p>
+                </div>
+              </div>
+            )}
           </motion.div>
         ) : mode === "ask" ? (
           <motion.div key="ask" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-4">
@@ -62,20 +149,31 @@ export function SafetyCheck() {
           <motion.div key="needs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <p className="text-[19px] text-navy">What do you need? Pick any.</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {NEEDS.map(([k, label]) => {
+              {NEEDS.map(([k, l]) => {
                 const on = needs.includes(k);
                 return (
                   <button key={k} aria-pressed={on} onClick={() => setNeeds((x) => (on ? x.filter((y) => y !== k) : [...x, k]))}
                     className={`h-10 rounded-full border px-4 text-sm ${on ? "border-midnight bg-midnight text-cream-2" : "border-navy/15 text-navy hover:bg-cream-2"}`}>
-                    {label}
+                    {l}
                   </button>
                 );
               })}
             </div>
+            <input value={noteText} onChange={(e) => setNoteText(e.target.value.slice(0, 200))} placeholder="Anything they should know? (optional, e.g. two kids, one needs insulin)"
+              aria-label="Note for responders" className="mt-3 h-11 w-full rounded-[12px] border border-navy/[0.12] bg-white/60 px-3 text-[15px] text-navy outline-none focus:border-midnight" />
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-dusty-deep">Where should they find you?</span>
+              {([["home", "My home address"], ["here", "Where I am now"]] as const).map(([k, l]) => (
+                <button key={k} aria-pressed={where === k} onClick={() => setWhere(k)}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 ${where === k ? "border-midnight bg-midnight text-cream-2" : "border-navy/15 text-navy hover:bg-cream-2"}`}>
+                  {k === "here" ? <LocateFixed className="h-3.5 w-3.5" strokeWidth={1.75} /> : <MapPin className="h-3.5 w-3.5" strokeWidth={1.75} />} {l}
+                </button>
+              ))}
+            </div>
             <div className="mt-4 flex items-center gap-3">
-              <button disabled={sending} onClick={() => send(false)} className="pill-dark h-11">Send to responders</button>
+              <button disabled={sending || !needs.length} onClick={() => send(false)} className="pill-dark h-11 disabled:opacity-40">{sending ? "Sending…" : "Send to responders"}</button>
               <button onClick={() => setMode(ci ? "done" : "ask")} className="text-sm text-dusty-deep">Cancel</button>
-              <p className="ml-auto max-w-[280px] text-xs text-dusty-deep">Responders see this right away. It can only move you up their list. If anyone is hurt, call 911.</p>
+              <p className="ml-auto max-w-[300px] text-xs text-dusty-deep">Responders see your needs, note and location, never your balances. It can only move you up their list. If anyone is hurt, call 911.</p>
             </div>
           </motion.div>
         )}

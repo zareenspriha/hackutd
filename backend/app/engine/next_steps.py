@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..models import Household, Scenario
-from .bridge import available_bridge
+from .bridge import available_bridge, bridge_offer
 from .forecast import run_forecast
 
 TOP_N = 3
@@ -20,8 +20,10 @@ def compute_next_steps(h: Household, s: Scenario | None = None, fc: dict | None 
 
     # 1. claim not filed
     if h.disaster_mode and not h.claim.filed:
+        lim = bridge_offer(h)["limit"]
         steps.append(_step("file_claim", 1, "File your insurance claim today",
-                           "Every day you wait pushes back your payout.", "/claim/file"))
+                           "Every day you wait pushes back your payout."
+                           + (f" Filing also unlocks up to ${lim:,.0f} in Bridge Funds." if lim >= 1 else ""), "/claim/file"))
 
     # 2. rooms scanned before but not after
     if h.disaster_mode:
