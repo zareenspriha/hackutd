@@ -1,0 +1,130 @@
+"use client";
+import { motion } from "motion/react";
+import { ArrowRight, CheckCircle2, CircleDashed, Share2 } from "lucide-react";
+import { useDemo } from "../demo";
+import { EASE, Rise, Stage, useNav } from "../ui";
+import { atms, circle } from "@/lib/demoData";
+import { forecast } from "@/lib/mock";
+import { usd } from "@/lib/format";
+
+export default function Circle() {
+  const { go } = useNav();
+  const { s, set, toast } = useDemo();
+
+  // Gap comes from the forecast (6-week claim, today's state).
+  const pts = forecast(6, 1, s.paycheckDelayed ? 2 : 0, s.bridgeTaken ? 2480 : 0).map((p) => ({ ...p, balance: p.balance + (s.sisterSent ? 200 : 0) }));
+  const low = pts.reduce((m, p) => (p.balance < m.balance ? p : m), pts[0]);
+  const gap = Math.max(0, Math.ceil(-low.balance / 50) * 50);
+  const when = new Date(new Date("2026-11-08T12:00:00").getTime() + low.day * 86400000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+  return (
+    <Stage
+      left={
+        <>
+          <Rise>
+            <p className="eyebrow">Help circle</p>
+            <h1 className="headline mt-4 text-[60px]">
+              Let your people <span className="text-dusty">help.</span>
+            </h1>
+          </Rise>
+
+          <Rise delay={0.1} className="mt-7 rounded-[20px] bg-midnight p-6 text-cream-2">
+            {gap > 0 ? (
+              <>
+                <p className="text-xs uppercase tracking-[0.2em] text-ivory">Ask for help</p>
+                <p className="mt-2 text-[26px] font-light leading-snug">You may be {usd(gap)} short around {when} if the claim runs late.</p>
+                <button onClick={() => toast("Link copied. Share it with your circle.")} className="pill mt-4 bg-cream-2 text-midnight hover:bg-white">
+                  <Share2 className="h-4 w-4" strokeWidth={1.75} /> Share a request for {usd(gap)}
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-xs uppercase tracking-[0.2em] text-ivory">You&apos;re covered</p>
+                <p className="mt-2 text-[26px] font-light leading-snug">No gap right now, even if the claim runs six weeks.</p>
+              </>
+            )}
+          </Rise>
+
+          <Rise delay={0.18} className="mt-4 rounded-[20px] border border-navy/[0.08] bg-cream p-5">
+            <p className="eyebrow">Your circle</p>
+            <ul className="mt-3 space-y-3">
+              {circle.map((p) => {
+                const sent = p.rel === "sister" ? (s.sisterSent ? 200 : 0) : p.sent;
+                return (
+                  <li key={p.name} className="flex items-center gap-3">
+                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-ivory text-sm font-semibold text-midnight">{p.initials}</span>
+                    <div className="flex-1">
+                      <p className="text-navy">{p.name}</p>
+                      <p className="text-sm text-dusty-deep">{p.rel}</p>
+                    </div>
+                    {sent ? (
+                      <span className="tnum flex items-center gap-1.5 text-sm text-navy"><CheckCircle2 className="h-4 w-4 text-sage" strokeWidth={1.75} /> Sent {usd(sent)}</span>
+                    ) : (
+                      <span className="text-sm text-dusty-deep">Not asked yet</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {!s.sisterSent && (
+              <button onClick={() => (set({ sisterSent: true }), toast("Your sister sent $200"))} className="mt-4 text-sm font-medium text-midnight underline underline-offset-4">
+                Simulate: Ana sends $200
+              </button>
+            )}
+            {s.sisterSent && (
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 rounded-[14px] bg-cream-2 px-4 py-2.5 text-sm text-dusty-deep">
+                $200 from Ana · Nov 8 · tagged as recovery help
+              </motion.p>
+            )}
+          </Rise>
+        </>
+      }
+      right={
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.5, ease: EASE }}>
+          <p className="eyebrow mb-3">Cash access · Working ATMs near you</p>
+          <div className="relative aspect-[16/9] overflow-hidden rounded-[28px] bg-cream-2 shadow-[0_24px_50px_-28px_rgba(15,26,43,0.5)]">
+            {/* stylized street map. TODO (Banking): replace with react-leaflet + CartoDB Positron tiles */}
+            <svg viewBox="0 0 100 56" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden>
+              <rect width="100" height="56" fill="#e6e4df" />
+              {[10, 24, 40, 55, 70, 86].map((x) => <line key={x} x1={x} x2={x + 4} y1={0} y2={56} stroke="#f2f1ee" strokeWidth={1.4} />)}
+              {[9, 21, 34, 47].map((y) => <line key={y} x1={0} x2={100} y1={y} y2={y + 2} stroke="#f2f1ee" strokeWidth={1.4} />)}
+              <path d="M0,40 C20,36 30,46 50,40 S80,30 100,34" stroke="#bdc4d4" strokeWidth={3} fill="none" />
+              <rect x="62" y="4" width="14" height="10" rx="1" fill="#6e9277" opacity="0.25" />
+            </svg>
+            {atms.map((a) => (
+              <div key={a.name} className="absolute -translate-x-1/2 -translate-y-full" style={{ left: `${a.x}%`, top: `${a.y}%` }}>
+                <svg width="22" height="28" viewBox="0 0 22 28" aria-hidden>
+                  <path d="M11 27s9-9.2 9-15.5A9 9 0 1 0 2 11.5C2 17.8 11 27 11 27z" fill={a.open ? "#1c2e4a" : "#8a93a3"} />
+                  <circle cx="11" cy="11" r="3.2" fill="#f2f1ee" />
+                </svg>
+              </div>
+            ))}
+            <div className="absolute" style={{ left: "48%", top: "52%" }}>
+              <motion.span className="absolute -left-4 -top-4 h-8 w-8 rounded-full bg-dusty/30" animate={{ scale: [1, 1.8], opacity: [0.6, 0] }} transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }} />
+              <span className="absolute -left-2 -top-2 h-4 w-4 rounded-full border-2 border-cream-2 bg-dusty" />
+            </div>
+            <span className="absolute bottom-4 left-4 rounded-full bg-midnight/80 px-3 py-1 text-xs text-cream-2">You · Hotel on Preston Rd</span>
+          </div>
+          <ul className="mt-4 space-y-2">
+            {atms.map((a) => (
+              <li key={a.name} className="flex items-center gap-4 rounded-[16px] border border-navy/[0.08] bg-cream px-5 py-3">
+                <span className="tnum w-14 text-sm text-dusty-deep">{a.dist}</span>
+                <span className="flex-1 text-navy">{a.name}</span>
+                {a.open ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-sage/20 px-2.5 py-1 text-xs font-medium text-[#3f6248]"><CheckCircle2 className="h-3.5 w-3.5" strokeWidth={1.75} /> Open</span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate/25 px-2.5 py-1 text-xs font-medium text-dusty-deep"><CircleDashed className="h-3.5 w-3.5" strokeWidth={1.75} /> Offline</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-4 flex justify-end">
+            <button onClick={() => go("lantern")} className="pill-light">
+              See the responder side <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        </motion.div>
+      }
+    />
+  );
+}
