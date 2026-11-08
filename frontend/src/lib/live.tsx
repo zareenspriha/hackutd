@@ -54,7 +54,7 @@ export type LPriority = {
   needs?: number; summary?: string; assigned_to?: string | null; contacted?: boolean; last_contact?: LOutreach | null;
   check_in?: LCheckIn | null; shares_hardship?: boolean;
 };
-export type LOutreach = { ts: string; by: string; kind: "check_in" | "assign" | "bridge_offer" | "sweep"; note: string };
+export type LOutreach = { ts: string; by: string; kind: "check_in" | "assign" | "bridge_offer" | "sweep" | "message" | "reply"; note: string };
 export type LCheckIn = { ts: string; safe: boolean; needs: string[]; note?: string; place?: string; lat?: number | null; lng?: number | null };
 export type LActivity = { ts: string; actor: string; text: string; amount: number | null; bank_ref: string | null };
 export type LActivityView = {
@@ -97,6 +97,12 @@ export type LCard =
 export type LCoach = {
   intent: string; answer: string; card: LCard | null; next_step: LNextStep | null; assumptions: string[]; numbers_checked?: boolean;
   ai_wording_used?: boolean; actions?: { label: string; go: string }[]; follow_ups?: string[];
+};
+export type LCardPurchase = { ts: string; merchant: string; kind: string; amount: number; approved: boolean; reason: string; added_to_claim: number; bank_ref: string | null };
+export type LCard_ = {
+  active: boolean; last4: string; limit: number; spent: number; available: number; added_to_claim: number;
+  food: { spent: number; normal: number; days: number }; purchases: LCardPurchase[]; rules: string[];
+  terminal: { id: string; merchant: string; kind: string; amount: number; what: string }[];
 };
 export type LTurn = { role: "user" | "looma"; text: string };
 export type LHelpStatus = {
@@ -199,6 +205,16 @@ type Live = {
   reset: () => Promise<void>;
   checkIn: (safe: boolean, needs: string[], extra?: { note?: string; lat?: number; lng?: number }) => Promise<LHelpStatus | null>;
   helpStatus: () => Promise<LHelpStatus | null>;
+  card: () => Promise<LCard_ | null>;
+  activateCard: () => Promise<LCard_ | null>;
+  /** Tap the card at a place. Returns the bank's answer, or null if it didn't go through. */
+  cardBuy: (terminalId: string) => Promise<{ approved: boolean; reason: string; added_to_claim?: number; bank_ref?: string | null; card: LCard_ } | null>;
+  /** The family's conversation with responders, oldest first. */
+  thread: () => Promise<LOutreach[]>;
+  reply: (text: string) => Promise<boolean>;
+  /** Responder side: one household's conversation, and sending a written message. */
+  staffThread: (id: string) => Promise<LOutreach[]>;
+  message: (id: string, note: string) => Promise<boolean>;
   setPrivacy: (shareHardship: boolean) => Promise<void>;
   activity: () => Promise<LActivityView | null>;
   claimCheck: () => Promise<LClaimCheck | null>;
@@ -213,6 +229,7 @@ type Live = {
   requestHelp: (names?: string[], amount?: number) => Promise<string | null>;
   demo: {
     disaster: () => Promise<void>;
+    storm: () => Promise<boolean>;
     delayPaycheck: (days: number) => Promise<void>;
     presetScan: (phase: "before" | "after", room?: string) => Promise<boolean>;
   };
@@ -345,7 +362,16 @@ export function LiveProvider({ children, staffName = null }: { children: React.R
     },
     reset: async () => void (await act(() => req("POST", "/demo/reset"))),
     checkIn: async (safe, needs, extra) => act(() => req<LHelpStatus>("POST", hh("/check-in"), { safe, needs, ...extra })),
+    card: async () => (API ? req<LCard_>("GET", hh("/card")).catch(() => null) : null),
+    activateCard: async () => act(() => req<LCard_>("POST", hh("/card/activate"))),
+    cardBuy: async (terminalId) => act(() => req("POST", hh("/card/purchase"), { terminal_id: terminalId })),
     helpStatus: async () => (API ? req<LHelpStatus>("GET", hh("/help-status")).catch(() => null) : null),
+    thread: async () => (API ? (await req<{ messages: LOutreach[] }>("GET", hh("/messages")).catch(() => ({ messages: [] }))).messages : []),
+    reply: async (text) => (await act(() => req("POST", hh("/messages"), { text }))) !== null,
+    staffThread: async (id) =>
+      API ? (await req<{ outreach: LOutreach[] }>("GET", `/insurer/households/${id}/outreach`, undefined, undefined, staffName ?? "").catch(() => ({ outreach: [] }))).outreach : [],
+    message: async (id, note) =>
+      (await act(() => req("POST", `/insurer/households/${id}/reach-out`, { kind: "message", note }, undefined, staffName ?? ""))) !== null,
     setPrivacy: async (share) => void (await act(() => req("POST", hh("/privacy"), { share_hardship: share }))),
     activity: async () => (API ? req<LActivityView>("GET", hh("/activity")).catch(() => null) : null),
     homeRecord: async () => (API ? req<LHomeRecord>("GET", hh("/home-record")).catch(() => null) : null),
@@ -361,6 +387,7 @@ export function LiveProvider({ children, staffName = null }: { children: React.R
     requestHelp: async (names, amount) => (await act(() => req<{ link: string }>("POST", hh("/circle/request"), { names: names ?? [], amount: amount ?? null })))?.link ?? null,
     demo: {
       disaster: async () => void (await act(() => req("POST", "/demo/disaster"))),
+      storm: async () => (await act(() => req("POST", "/demo/storm"))) !== null,
       delayPaycheck: async (days) => void (await act(() => req("POST", `/demo/delay-paycheck?days=${days}`))),
       presetScan: async (phase, room = "Garage") =>
         (await act(() => req("POST", `/demo/scan?phase=${phase}&room=${encodeURIComponent(room)}`))) !== null,
@@ -380,6 +407,7 @@ export function sceneOf(action: string) {
   if (action.startsWith("/claim") || action.startsWith("/receipts")) return "claim";
   if (action.startsWith("/scan")) return "scan";
   if (action.startsWith("/bridge")) return "fund";
+  if (action.startsWith("/card")) return "card";
   if (action.startsWith("/bills")) return "bills";
   if (action.startsWith("/help-circle")) return "circle";
   if (action.startsWith("/ladder")) return "picture";

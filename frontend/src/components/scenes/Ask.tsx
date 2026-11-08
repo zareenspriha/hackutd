@@ -124,6 +124,7 @@ export default function Ask() {
 
   const asked = new Set(msgs.filter((m) => m.role === "user").map((m) => m.text));
   const chips = Object.keys(scripted).filter((q) => !asked.has(q));
+  const steps = live.data?.home.next_steps ?? [];
 
   return (
     <Stage
@@ -175,6 +176,24 @@ export default function Ask() {
                     <Cat size={28} blink={false} />
                     <div className="max-w-[80%] rounded-3xl rounded-bl-md bg-white/55 p-5">
                       <p className="text-[16px] leading-relaxed text-midnight"><Headline text={m.text} /></p>
+                      {i === 0 && steps.length > 0 && (
+                        <div className="mt-4">
+                          <p className="eyebrow">Your next steps</p>
+                          <ol className="mt-2 space-y-1.5">
+                            {steps.map((t, n) => (
+                              <li key={t.id}>
+                                <button onClick={() => askStep(t.title, t.id)} disabled={typing}
+                                  className={`group flex w-full items-center gap-3 rounded-2xl px-4 py-2.5 text-left transition ${n === 0 ? "bg-midnight text-butter" : "bg-butter/60 text-midnight hover:bg-butter"}`}>
+                                  <span className="opacity-50">{n + 1}</span>
+                                  <span className="flex-1 text-[15px]">{t.title}</span>
+                                  <ArrowRight className="h-4 w-4 shrink-0 opacity-60 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
+                                </button>
+                              </li>
+                            ))}
+                          </ol>
+                          <p className="mt-2 text-xs text-dusty-deep">Tap one and I&apos;ll walk you through it.</p>
+                        </div>
+                      )}
                       {m.rich && <RichCard r={m.rich} />}
                       {m.assumptions && <Assumptions items={m.assumptions} />}
                       {m.actions && m.actions.length > 0 && (

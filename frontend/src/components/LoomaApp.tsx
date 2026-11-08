@@ -18,6 +18,7 @@ import Scan from "./scenes/Scan";
 import Compare from "./scenes/Compare";
 import Claim from "./scenes/Claim";
 import Fund from "./scenes/Fund";
+import Card from "./scenes/Card";
 import Bills from "./scenes/Bills";
 import Circle from "./scenes/Circle";
 import Ask from "./scenes/Ask";
@@ -25,7 +26,7 @@ import Picture from "./scenes/Picture";
 import Wait from "./scenes/Wait";
 
 const view: Record<SceneId, React.ComponentType> = {
-  title: Today, today: Today, scan: Scan, compare: Compare, claim: Claim, fund: Fund, bills: Bills,
+  title: Today, today: Today, scan: Scan, compare: Compare, claim: Claim, fund: Fund, card: Card, bills: Bills,
   circle: Circle, ask: Ask, picture: Picture, wait: Wait,
 };
 

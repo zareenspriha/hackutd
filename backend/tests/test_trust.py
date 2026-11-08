@@ -142,9 +142,9 @@ def test_bridge_funds_safety_rules(c):
 def test_help_request_shows_real_status(c):
     r = c.post("/households/garcia/check-in", json={"safe": False, "needs": ["shelter", "cash"], "note": "two kids",
                                                     "lat": 32.9, "lng": -96.8}).json()
-    assert r["rank"] and [t["done"] for t in r["timeline"]] == [True, False, False, False]
+    assert r["rank"] and [t["done"] for t in r["timeline"]] == [True, False, False]
     assert r["location"]["lat"] == 32.9 and {x["need"] for x in r["self_help"]} == {"shelter", "cash"}
-    c.get("/insurer/households/garcia", headers={"X-Staff": "Jordan"})
+    c.post("/insurer/households/garcia/assign", headers={"X-Staff": "Jordan"}, json={"to": "Jordan"})
     st = c.get("/households/garcia/help-status").json()
     assert st["timeline"][1]["done"] and st["timeline"][1]["detail"] == "Jordan"
 
@@ -165,3 +165,50 @@ def test_coach_explains_a_next_step_and_asks_trip_cost(c):
     r = c.post("/households/garcia/coach", json={"question": "what about $300?",
                "history": [{"role": "user", "text": "Can I still take that vacation?"}]}).json()
     assert r["intent"] == "vacation" and "$300" in r["draft"]
+
+
+def test_storm_replays_the_sweep_and_keeps_garcia_first(c):
+    staff = {"X-Staff": "Jordan"}
+    first = c.post("/insurer/sweep", headers=staff).json()["reached"]
+    assert first > 0 and c.post("/insurer/sweep", headers=staff).json()["reached"] == 0
+    c.post("/demo/storm")
+    assert c.post("/insurer/sweep", headers=staff).json()["reached"] == first  # replayable
+    top = c.get("/insurer/households", params={"limit": 1}).json()["households"][0]
+    assert top["id"] == "garcia" and top["last_contact"]["kind"] == "sweep"
+
+
+def test_responder_and_family_can_message_each_other(c):
+    staff = {"X-Staff": "Jordan"}
+    assert c.post("/insurer/households/garcia/reach-out", headers=staff, json={"kind": "message", "note": ""}).status_code == 400
+    c.post("/insurer/households/garcia/reach-out", headers=staff, json={"kind": "message", "note": "Can I visit at 10am?"})
+    c.post("/households/garcia/messages", json={"text": "Yes, see you then"})
+    thread = c.get("/insurer/households/garcia/outreach", headers=staff).json()["outreach"]
+    assert [(m["kind"], m["note"]) for m in thread[-2:]] == [("message", "Can I visit at 10am?"), ("reply", "Yes, see you then")]
+    assert "Hasn't answered outreach" not in c.get("/insurer/households/garcia", headers=staff).json()["reasons"]
+
+
+def test_recovery_card_essentials_only_and_purchases_become_claim_proof(c):
+    assert c.post("/households/garcia/card/activate").status_code == 400  # needs Bridge Funds first
+    c.post("/households/garcia/claim/file")
+    c.post("/households/garcia/bridge/disburse", json={"amount": 600})
+    card = c.post("/households/garcia/card/activate").json()
+    assert card["active"] and card["limit"] == 600
+    ale0 = c.get("/households/garcia/claim").json()["owed"]["extra_living_expenses"]
+    r = c.post("/households/garcia/card/purchase", json={"terminal_id": "hotel"}).json()
+    assert r["approved"] and r["added_to_claim"] == 89 and r["bank_ref"]
+    assert r["claim_extra_living"] == ale0 + 89
+    tv = c.post("/households/garcia/card/purchase", json={"terminal_id": "tv"}).json()
+    assert not tv["approved"] and "essential" in tv["reason"]
+    gas = c.post("/households/garcia/card/purchase", json={"terminal_id": "gas"}).json()
+    assert gas["approved"] and gas["added_to_claim"] == 0
+    meal = c.post("/households/garcia/card/purchase", json={"terminal_id": "taqueria"}).json()
+    assert meal["approved"] and meal["added_to_claim"] == 0 and "normal" in meal["reason"]  # under the weekly grocery budget
+    big = c.post("/households/garcia/card/purchase", json={"merchant": "Hotel", "kind": "lodging", "amount": 590}).json()
+    assert not big["approved"] and "left on the card" in big["reason"]
+
+
+def test_messages_can_start_over(c):
+    c.post("/insurer/households/garcia/reach-out", headers={"X-Staff": "Jordan"}, json={"kind": "message", "note": "Hi"})
+    assert c.get("/households/garcia/messages").json()["messages"]
+    c.delete("/households/garcia/messages")
+    assert c.get("/households/garcia/messages").json()["messages"] == []

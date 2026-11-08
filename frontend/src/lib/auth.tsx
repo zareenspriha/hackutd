@@ -4,6 +4,7 @@
  * TODO (backend): replace with real accounts (POST /auth/signup, /auth/login) that map a user to their household.
  * For the hackathon, every account opens the Garcia household, the only one with full demo data.
  */
+import { API, HOUSEHOLD } from "./live";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
 export type User = { name: string; email: string; household: string; bankLinked: boolean };
@@ -37,6 +38,19 @@ const write = (u: User | null) => {
   }
 };
 
+/** Demo: every account opens the shared Garcia household, so a different account starts with a fresh conversation. */
+const LAST = "looma.lastEmail";
+function freshStartFor(email: string) {
+  try {
+    const key = email.trim().toLowerCase();
+    if (localStorage.getItem(LAST) === key) return;
+    localStorage.setItem(LAST, key);
+  } catch {
+    /* storage blocked: skip */
+  }
+  if (API) fetch(`${API}/households/${HOUSEHOLD}/messages`, { method: "DELETE" }).catch(() => {});
+}
+
 export const firstName = (u: User) => u.name.split(" ")[0] || "there";
 export const initials = (u: User) =>
   u.name
@@ -63,8 +77,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value: Auth = {
     user,
     ready,
-    signUp: (name, email) => save({ name: name.trim(), email: email.trim(), household: "garcia", bankLinked: false }),
-    logIn: (email) => save(read()?.email === email.trim() ? read() : { name: "Maria Garcia", email: email.trim(), household: "garcia", bankLinked: true }),
+    signUp: (name, email) => (freshStartFor(email), save({ name: name.trim(), email: email.trim(), household: "garcia", bankLinked: false })),
+    logIn: (email) => (freshStartFor(email), save(read()?.email === email.trim() ? read() : { name: "Maria Garcia", email: email.trim(), household: "garcia", bankLinked: true })),
     linkBank: () => user && save({ ...user, bankLinked: true }),
     logOut: () => save(null),
   };

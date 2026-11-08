@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from ..engine.disaster import set_disaster_mode
 from ..engine.valuation import value_item
 from ..engine.compare import compare_items
+from ..engine.priority import score
 from ..models import Item, RoomScan
 from ..seed import seed
 from ..services.gemini import get_gemini
@@ -21,6 +22,28 @@ DEMO = "garcia"
 async def demo_reset():
     """Reset everything to the starting demo state (run before each rehearsal)."""
     return await seed(force=True)
+
+
+@router.post("/storm")
+async def storm():
+    """Replay the storm on the responder map: clear earlier outreach and assignments so the
+    "check on everyone not reached" sweep starts from zero. Claims, scans and money are untouched."""
+    from ..store import get_store
+
+    store = get_store()
+    hs = await store.top_priority(5000)
+    changed = []
+    for h in hs:
+        if h.outreach or h.assigned_to:  # "hasn't answered earlier outreach" stays: it's part of who they are
+            h.outreach, h.assigned_to = [], None
+            score(h)
+            changed.append(h)
+    if changed:
+        await store.save_many(changed)
+    g = await load(DEMO)
+    set_disaster_mode(g, True)
+    await commit(g, activity=False)
+    return {"households": len(hs), "cleared": len(changed)}
 
 
 @router.post("/disaster")

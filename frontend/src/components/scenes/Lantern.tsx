@@ -1,13 +1,17 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
-import { ArrowLeft, Check, HandHelping, Radar, Search, Send, ShieldCheck, UserRoundCheck, Zap } from "lucide-react";
+import { ArrowLeft, Check, CloudLightning, HandHelping, Radar, Search, Send, ShieldCheck, Smartphone, UserRoundCheck, X, Zap } from "lucide-react";
+import dynamic from "next/dynamic";
 import Logo from "../Logo";
+import { Thread } from "../Trust";
 import { useDemo } from "../demo";
 import { EASE } from "../ui";
 import { syntheticHouseholds, tierOf } from "@/lib/mock";
 import type { PriorityHousehold } from "@/lib/types";
 import { useLive, type LCheckIn, type LOutreach } from "@/lib/live";
+
+const RealMap = dynamic(() => import("../RealMap"), { ssr: false });
 
 type Row = PriorityHousehold & { needs?: number; assigned_to?: string | null; contacted?: boolean; last_contact?: LOutreach | null; check_in?: LCheckIn | null; shares_hardship?: boolean };
 
@@ -43,6 +47,7 @@ export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOu
   const [silentOnly, setSilentOnly] = useState(false);
   const [zip, setZip] = useState("");
   const [sel, setSel] = useState("garcia");
+  const [panel, setPanel] = useState<"list" | "detail">("list");
   const [contacted, setContacted] = useState<Set<string>>(new Set());
   const wasContacted = (h: Row) => h.contacted || contacted.has(h.id);
 
@@ -76,11 +81,82 @@ export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [livePri]);
 
-  const list = all.filter((h) => tiers.includes(h.tier!) && (!silentOnly || !wasContacted(h)) && (!zip || h.zip?.startsWith(zip)));
+  const [minLat, maxLat, minLng, maxLng] = [32.6, 33.0, -97.02, -96.48];
+  const px = (lng: number) => ((lng - minLng) / (maxLng - minLng)) * 100;
+  const py = (lat: number) => (1 - (lat - minLat) / (maxLat - minLat)) * 100;
+
+  // ---- The storm: a front crosses the county, households light up as it hits them, the list ranks them live,
+  // then one tap checks on every urgent household no one has reached, and Maria's phone gets the message.
+  const [storm, setStorm] = useState<number | null>(null); // storm front, in map % (left to right)
+  const [stormStage, setStormStage] = useState<"idle" | "hitting" | "reaching" | "done">("idle");
+  const [stormReached, setStormReached] = useState<number | null>(null);
+  const [flash, setFlash] = useState(false);
+  const stormTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => () => void (stormTimer.current && clearInterval(stormTimer.current)), []);
+  const hitBy = (h: Row) => storm === null || px(h.lng) <= storm;
+
+  async function runStorm() {
+    if (stormStage === "hitting" || stormStage === "reaching") return;
+    setStormReached(null);
+    setStormStage("hitting");
+    setStorm(-12);
+    if (livePri) await live.demo.storm(); // clear earlier outreach so the sweep starts from zero
+    const t0 = Date.now(), DUR = 6500;
+    const bolts = [0.18, 0.47, 0.71];
+    stormTimer.current = setInterval(() => {
+      const k = Math.min(1, (Date.now() - t0) / DUR);
+      setStorm(-12 + k * 124);
+      if (bolts.some((b) => Math.abs(k - b) < 0.012)) {
+        setFlash(true);
+        setTimeout(() => setFlash(false), 120);
+      }
+      if (k >= 1) {
+        clearInterval(stormTimer.current!);
+        setStorm(null);
+        setStormStage("reaching");
+        setTimeout(async () => {
+          const r = livePri ? await live.sweep() : { reached: Math.round(all.filter((h) => h.tier === "urgent").length * 0.8) };
+          setStormReached(r?.reached ?? 0);
+          setSel("garcia");
+          setPanel("detail");
+          setStormStage("done");
+        }, 1400);
+      }
+    }, 50);
+  }
+
+  const pool = storm === null ? all : all.filter(hitBy);
+  const list = pool.filter((h) => tiers.includes(h.tier!) && (!silentOnly || !wasContacted(h)) && (!zip || h.zip?.startsWith(zip)));
   const shown = list.slice(0, 40);
   const inList = new Set(list.map((h) => h.id));
   const current = all.find((h) => h.id === sel) ?? all[0];
-  const stats: [string, string | number, string?][] = cov
+  const garciaLast = all.find((h) => h.id === "garcia")?.last_contact;
+  // what Maria last received (never her own reply)
+  const [toMaria, setToMaria] = useState<LOutreach | null>(null);
+  useEffect(() => {
+    if (garciaLast && garciaLast.kind !== "reply") setToMaria(garciaLast);
+  }, [garciaLast]);
+  // the selected family's conversation, live
+  const [thread, setThread] = useState<LOutreach[]>([]);
+  useEffect(() => {
+    if (!livePri || !current) return;
+    let on = true;
+    const tick = () => live.staffThread(current.id).then((m) => on && setThread(m));
+    setThread([]);
+    tick();
+    const t = setInterval(tick, 4000);
+    return () => ((on = false), clearInterval(t));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id, !!livePri, stormStage]);
+  const hitUrgent = pool.filter((h) => h.tier === "urgent").length;
+  const stats: [string, string | number, string?][] = storm !== null
+    ? [
+        ["Households hit", pool.length],
+        ["Urgent", hitUrgent],
+        ["Urgent reached", "0%"],
+        ["Not reached yet", hitUrgent, hitUrgent ? "warn" : "ok"],
+      ]
+    : cov
     ? [
         ["Households affected", cov.households],
         ["Urgent", cov.urgent],
@@ -108,88 +184,159 @@ export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOu
       return r;
     }, "Every urgent household has now been reached");
 
-  const [minLat, maxLat, minLng, maxLng] = [32.6, 33.0, -97.02, -96.48];
-  const px = (lng: number) => ((lng - minLng) / (maxLng - minLng)) * 100;
-  const py = (lat: number) => (1 - (lat - minLat) / (maxLat - minLat)) * 100;
 
   return (
-    <div className="flex h-full flex-col px-8 pb-6 pt-5 text-ivory">
-      <div className="mb-5 flex items-center justify-between">
+    <div className="flex h-full flex-col px-10 pb-8 pt-6 text-ivory">
+      <div className="flex items-center justify-between">
         <span className="invert"><Logo width={96} animate={false} id="lantern-logo" /></span>
         <div className="flex items-center gap-3">
-          <span className="rounded-full bg-raised px-3 py-1.5 text-xs text-ivory">Insurer staff · {staff ?? "Responder"}</span>
-          <button onClick={onSignOut} className="flex h-10 items-center gap-2 rounded-full border border-ivory/20 px-4 text-sm text-cream-2 hover:bg-raised">
+          {livePri ? (
+            <span className="flex items-center gap-2 text-xs text-ivory/60" aria-live="polite">
+              <motion.span className="h-1.5 w-1.5 rounded-full bg-sage" animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1.6, repeat: Infinity }} />
+              Live · {synced.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })}
+            </span>
+          ) : (
+            <button onClick={() => (setUpdated(true), setSel("garcia"), toast("New data: Garcia after-scan arrived"))} disabled={updated} className="flex h-9 items-center gap-2 rounded-full border border-ivory/20 px-3 text-xs text-cream-2 disabled:opacity-40">
+              <Zap className="h-3.5 w-3.5" strokeWidth={1.75} /> {updated ? "Garcia data updated" : "Simulate new data"}
+            </button>
+          )}
+          <span className="rounded-full bg-raised px-3 py-1.5 text-xs text-ivory">{staff ?? "Responder"}</span>
+          <button onClick={onSignOut} className="flex h-9 items-center gap-2 rounded-full border border-ivory/20 px-4 text-sm text-cream-2 hover:bg-raised">
             <ArrowLeft className="h-4 w-4" strokeWidth={1.75} /> Sign out
           </button>
         </div>
       </div>
-      {/* top bar */}
-      <div className="flex items-end justify-between gap-6">
+
+      {/* headline, the numbers that matter, and the two big actions */}
+      <div className="mt-8 flex items-end justify-between gap-8">
         <div>
-          <p className="text-xs font-medium uppercase tracking-[0.22em] text-ivory/70">The Lantern · Dallas County · Active disaster</p>
-          <h1 className="mt-2 text-[40px] font-light leading-none tracking-tight text-cream-2">
+          <h1 className="text-[52px] font-light leading-none tracking-[-0.03em] text-cream-2">
             No one overlooked<span className="text-dusty">.</span>
           </h1>
+          <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2">
+            {stats.map(([l, v, tone]) => (
+              <span key={l} className="flex items-baseline gap-2">
+                <span className={`tnum text-[26px] font-light leading-none ${tone === "warn" ? "text-[#e3a196]" : "text-cream-2"}`}>{typeof v === "number" ? v.toLocaleString() : v}</span>
+                <span className="text-sm text-ivory/60">{l.toLowerCase()}</span>
+              </span>
+            ))}
+          </div>
         </div>
-        <div className="flex gap-3">
-          {stats.map(([l, v, tone]) => (
-            <div key={l} className={`rounded-[16px] border px-5 py-3 ${tone === "warn" ? "border-clay/60 bg-clay/15" : "border-ivory/10 bg-midnight"}`}>
-              <p className="tnum text-[28px] font-light leading-none text-cream-2">{typeof v === "number" ? v.toLocaleString() : v}</p>
-              <p className="mt-1 text-xs text-ivory/70">{l}</p>
-            </div>
-          ))}
+        <div className="flex shrink-0 gap-2">
+          <button onClick={runStorm} disabled={stormStage === "hitting" || stormStage === "reaching"}
+            className="flex h-12 items-center gap-2 rounded-full border border-ivory/25 px-5 text-sm font-medium text-cream-2 transition hover:bg-raised disabled:opacity-50">
+            <CloudLightning className="h-4 w-4" strokeWidth={1.75} /> {stormStage === "idle" || stormStage === "done" ? "Replay the storm" : "Storm in progress…"}
+          </button>
           {cov && cov.overlooked > 0 && (
-            <button onClick={sweep} disabled={busy === "sweep"} className="flex items-center gap-2 rounded-[16px] bg-ivory px-5 text-left text-sm font-medium text-navy hover:bg-cream-2 disabled:opacity-50">
-              <Radar className="h-5 w-5" strokeWidth={1.75} /> Check on everyone<br />not reached
+            <button onClick={sweep} disabled={busy === "sweep"} className="flex h-12 items-center gap-2 rounded-full bg-cream-2 px-5 text-sm font-medium text-navy hover:bg-white disabled:opacity-50">
+              <Radar className="h-4 w-4" strokeWidth={1.75} /> Check on everyone not reached
             </button>
           )}
         </div>
       </div>
 
-      {/* filters */}
-      <div className="mt-5 flex items-center gap-2">
-        {(Object.keys(tierLabel) as Tier[]).map((t) => {
-          const on = tiers.includes(t);
-          return (
-            <button
-              key={t}
-              aria-pressed={on}
-              onClick={() => setTiers((x) => (on ? x.filter((y) => y !== t) : [...x, t]))}
-              className={`flex h-10 items-center gap-2 rounded-full border px-4 text-sm ${on ? "border-ivory/60 bg-raised text-cream-2" : "border-ivory/15 text-ivory/60"}`}
-            >
-              <span className="h-2 w-2 rounded-full" style={{ background: tierColor[t] }} /> {tierLabel[t]}
-            </button>
-          );
-        })}
-        <button aria-pressed={silentOnly} onClick={() => setSilentOnly(!silentOnly)} className={`h-10 rounded-full border px-4 text-sm ${silentOnly ? "border-ivory/60 bg-raised text-cream-2" : "border-ivory/15 text-ivory/60"}`}>
-          Not reached
-        </button>
-        <label className="ml-2 flex h-10 items-center gap-2 rounded-full border border-ivory/15 px-4 text-sm">
-          <Search className="h-4 w-4 text-ivory/60" strokeWidth={1.75} />
-          <input value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} placeholder="ZIP" className="w-16 bg-transparent text-cream-2 outline-none placeholder:text-ivory/50" aria-label="Filter by ZIP" />
-        </label>
-        {livePri ? (
-          <span className="ml-auto flex h-10 items-center gap-2 rounded-full border border-ivory/15 px-4 text-sm text-ivory/80" aria-live="polite">
-            <motion.span className="h-2 w-2 rounded-full bg-sage" animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1.6, repeat: Infinity }} />
-            Live · Updated {synced.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })}
-          </span>
-        ) : (
-          <button onClick={() => (setUpdated(true), setSel("garcia"), toast("New data: Garcia after-scan arrived"))} disabled={updated} className="ml-auto flex h-10 items-center gap-2 rounded-full bg-ivory px-4 text-sm font-medium text-navy disabled:opacity-40">
-            <Zap className="h-4 w-4" strokeWidth={1.75} /> {updated ? "Garcia data updated" : "Simulate new data"}
-          </button>
-        )}
-      </div>
+      <div className="mt-6 grid min-h-0 flex-1 grid-cols-[1fr_380px] gap-5 2xl:grid-cols-[1fr_440px]">
+        {/* field */}
+        <div className="relative min-h-0 overflow-hidden rounded-[28px] border border-ivory/10 bg-navy">
+          <RealMap
+            theme="dark"
+            className="absolute inset-0"
+            bounds={[[minLat, minLng], [maxLat, maxLng]]}
+            stormLng={storm === null ? null : minLng + (storm / 100) * (maxLng - minLng)}
+            selected={stormStage === "hitting" ? null : { lat: current.lat, lng: current.lng }}
+            onPick={(id) => (setSel(id), setPanel("detail"))}
+            points={all.map((h) => {
+              const visible = inList.has(h.id);
+              const x = px(h.lng);
+              const waiting = storm !== null && x > storm; // storm hasn't reached them yet
+              const crest = storm !== null && !waiting && storm - x < 6; // just hit: flare up
+              const r0 = h.isDemo ? 4.5 : 1.6 + (h.score / 100) * 2.2;
+              return {
+                id: h.id, lat: h.lat, lng: h.lng,
+                r: waiting ? 1.6 : crest ? r0 * 1.8 : r0,
+                color: waiting ? "#8a93a3" : crest ? "#f2f1ee" : tierColor[h.tier!],
+                opacity: waiting ? 0.45 : crest ? 0.95 : visible ? 0.45 + (h.score / 100) * 0.5 : 0.07,
+                glow: crest || (h.tier === "urgent" && visible && storm === null),
+              };
+            })}
+          />
+          <AnimatePresence>
+            {flash && <motion.div className="pointer-events-none absolute inset-0 z-[500] bg-cream-2" initial={{ opacity: 0.55 }} animate={{ opacity: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} />}
+          </AnimatePresence>
+          {/* what's happening, in one line */}
+          <AnimatePresence mode="wait">
+            {stormStage !== "idle" && (
+              <motion.div key={stormStage} initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                className="absolute left-1/2 top-12 z-[600] flex w-max max-w-[92%] -translate-x-1/2 flex-wrap items-center justify-center gap-x-2 gap-y-0.5 rounded-[18px] text-center bg-midnight/90 px-4 py-2 text-sm text-cream-2 shadow-lg backdrop-blur">
+                {stormStage === "hitting" && <><CloudLightning className="h-4 w-4 text-amber" strokeWidth={1.75} /> Storm crossing Dallas County · <b className="tnum font-medium">{pool.length.toLocaleString()}</b> households hit · <b className="tnum font-medium">{hitUrgent}</b> urgent</>}
+                {stormStage === "reaching" && <><Radar className="h-4 w-4 animate-spin text-sage" strokeWidth={1.75} /> Checking on every urgent household no one has reached…</>}
+                {stormStage === "done" && (
+                  <>
+                    <Check className="h-4 w-4 text-sage" /> {stormReached ? <>Check-in sent to <b className="tnum font-medium">{stormReached.toLocaleString()}</b> households in one tap</> : "Every urgent household was already reached"}
+                    <button onClick={() => setStormStage("idle")} aria-label="Dismiss" className="ml-1 rounded-full p-0.5 hover:bg-raised"><X className="h-3.5 w-3.5" /></button>
+                  </>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+          {stormStage === "reaching" && (
+            <motion.span className="pointer-events-none absolute left-1/2 top-1/2 z-[500] h-[140%] w-[140%] -translate-x-1/2 -translate-y-1/2 rounded-full border border-sage/50"
+              initial={{ scale: 0, opacity: 0.9 }} animate={{ scale: 1, opacity: 0 }} transition={{ duration: 1.4, ease: "easeOut" }} />
+          )}
+          {/* the family's side, live */}
+          <AnimatePresence>
+            {stormStage === "done" && (toMaria || !livePri) && (
+              <motion.div initial={{ opacity: 0, y: 20, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ delay: 0.5, duration: 0.45, ease: EASE }}
+                className="absolute bottom-3 left-3 z-[600] w-[min(260px,calc(100%-24px))] rounded-[22px] border border-ivory/15 bg-cream-2 p-4 text-navy shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7)]">
+                <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-dusty-deep"><Smartphone className="h-3.5 w-3.5" strokeWidth={1.75} /> On Maria&apos;s phone · now</p>
+                <p className="mt-2 text-[15px] leading-snug">{toMaria?.note ?? "Checking on you after the disaster. Are you safe? Reply in looma or call us anytime."}</p>
+                <p className="mt-2 text-xs text-dusty-deep">From {toMaria?.by ?? me} · Real responders never ask for fees or your PIN.</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <div className="pointer-events-none absolute left-3 top-3 z-[500] flex gap-3 rounded-full bg-midnight/80 px-3 py-1.5 text-xs text-ivory/80">
+            {(Object.keys(tierLabel) as Tier[]).map((t) => (
+              <span key={t} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: tierColor[t] }} /> {tierLabel[t]}</span>
+            ))}
+          </div>
+        </div>
 
-      <div className="mt-4 grid min-h-0 flex-1 grid-cols-[360px_1fr_400px] gap-4">
-        {/* ranked list */}
-        <div className="no-scrollbar min-h-0 overflow-y-auto rounded-[16px] border border-ivory/10 bg-midnight">
-          <p className="sticky top-0 z-10 bg-midnight px-4 py-3 text-xs text-ivory/70">{list.length.toLocaleString()} households · Showing top {shown.length}</p>
+        {/* right panel: the ranked list, or one household */}
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-[28px] border border-ivory/10 bg-midnight">
+          {panel === "list" ? (
+            <>
+            <div className="border-b border-ivory/10 px-5 pb-4 pt-5">
+              <div className="flex items-baseline justify-between">
+                <p className="text-[20px] font-light text-cream-2">Who needs help first</p>
+                <p className="tnum text-xs text-ivory/60">{list.length.toLocaleString()} households</p>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                {(Object.keys(tierLabel) as Tier[]).map((t) => {
+                  const on = tiers.includes(t);
+                  return (
+                    <button key={t} aria-pressed={on} onClick={() => setTiers((x) => (on ? x.filter((y) => y !== t) : [...x, t]))}
+                      className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs ${on ? "border-ivory/50 bg-raised text-cream-2" : "border-ivory/15 text-ivory/50"}`}>
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: tierColor[t] }} /> {tierLabel[t]}
+                    </button>
+                  );
+                })}
+                <button aria-pressed={silentOnly} onClick={() => setSilentOnly(!silentOnly)}
+                  className={`h-8 rounded-full border px-3 text-xs ${silentOnly ? "border-ivory/50 bg-raised text-cream-2" : "border-ivory/15 text-ivory/50"}`}>
+                  Not reached
+                </button>
+                <label className="flex h-8 items-center gap-1.5 rounded-full border border-ivory/15 px-3 text-xs">
+                  <Search className="h-3.5 w-3.5 text-ivory/60" strokeWidth={1.75} />
+                  <input value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} placeholder="ZIP" className="w-12 bg-transparent text-cream-2 outline-none placeholder:text-ivory/50" aria-label="Filter by ZIP" />
+                </label>
+              </div>
+            </div>
+        <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
           <LayoutGroup>
             <ol>
               {shown.map((h, i) => (
                 <motion.li key={h.id} layout transition={{ duration: 0.5, ease: EASE }}>
                   <button
-                    onClick={() => setSel(h.id)}
+                    onClick={() => (setSel(h.id), setPanel("detail"))}
                     className={`flex w-full items-center gap-3 border-l-2 px-4 py-3 text-left ${h.id === sel ? "border-ivory bg-raised" : "border-transparent hover:bg-raised/60"}`}
                   >
                     <span className="tnum w-6 text-sm text-ivory/60">{i + 1}</span>
@@ -218,48 +365,8 @@ export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOu
           </LayoutGroup>
         </div>
 
-        {/* field */}
-        <div className="relative min-h-0 overflow-hidden rounded-[16px] border border-ivory/10 bg-navy">
-          <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Map of affected households">
-            <path d="M-5,62 C15,55 25,70 40,58 S65,40 78,52 S95,70 105,60" fill="none" stroke="#1c2e4a" strokeWidth={3} />
-            {all.map((h) => {
-              const visible = inList.has(h.id);
-              return (
-                <circle
-                  key={h.id}
-                  cx={px(h.lng)}
-                  cy={py(h.lat)}
-                  r={h.isDemo ? 0.9 : 0.35 + (h.score / 100) * 0.45}
-                  fill={tierColor[h.tier!]}
-                  opacity={visible ? 0.35 + (h.score / 100) * 0.6 : 0.06}
-                  vectorEffect="non-scaling-stroke"
-                  onClick={() => setSel(h.id)}
-                  className="cursor-pointer"
-                >
-                  <title>{`${h.name} · score ${h.score} · ${tierLabel[h.tier!]}`}</title>
-                </circle>
-              );
-            })}
-          </svg>
-          {/* pulse on the selected household */}
-          <motion.span
-            key={`${current.id}-${updated}`}
-            className="pointer-events-none absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-ivory"
-            style={{ left: `${px(current.lng)}%`, top: `${py(current.lat)}%` }}
-            initial={{ scale: 0.6, opacity: 1 }}
-            animate={{ scale: [0.6, 2.2], opacity: [1, 0] }}
-            transition={{ duration: 1.2, repeat: current.isDemo ? 2 : 0, ease: "easeOut" }}
-          />
-          <span className="pointer-events-none absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-cream-2" style={{ left: `${px(current.lng)}%`, top: `${py(current.lat)}%` }} />
-          <div className="absolute bottom-3 left-3 flex gap-3 rounded-full bg-midnight/80 px-3 py-1.5 text-xs text-ivory/80">
-            {(Object.keys(tierLabel) as Tier[]).map((t) => (
-              <span key={t} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: tierColor[t] }} /> {tierLabel[t]}</span>
-            ))}
-          </div>
-          {/* TODO (Frontend): swap for react-leaflet + markercluster on CartoDB Dark Matter tiles */}
-        </div>
-
-        {/* detail drawer */}
+            </>
+          ) : (
         <AnimatePresence mode="wait">
           <motion.aside
             key={current.id + current.score}
@@ -267,8 +374,11 @@ export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOu
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 24 }}
             transition={{ duration: 0.28, ease: EASE }}
-            className="no-scrollbar min-h-0 overflow-y-auto rounded-[16px] border border-ivory/10 bg-midnight p-6"
+            className="no-scrollbar min-h-0 flex-1 overflow-y-auto p-6"
           >
+            <button onClick={() => setPanel("list")} className="mb-4 flex items-center gap-1.5 text-sm text-ivory/70 hover:text-cream-2">
+              <ArrowLeft className="h-4 w-4" strokeWidth={1.75} /> All households
+            </button>
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-ivory/70">ZIP {current.zip}</p>
@@ -311,7 +421,9 @@ export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOu
             {(current.assigned_to || current.last_contact) && (
               <div className="mt-3 space-y-1 text-sm text-ivory/80">
                 {current.assigned_to && <p>Adjuster: <span className="text-cream-2">{current.assigned_to}</span></p>}
-                {current.last_contact && <p>Last contact: {current.last_contact.kind === "sweep" ? "automatic check-in" : ({ check_in: "check-in", assign: "assigned", bridge_offer: "Bridge Funds offer" } as Record<string, string>)[current.last_contact.kind]} by {current.last_contact.by}</p>}
+                {current.last_contact && (current.last_contact.kind === "reply"
+                  ? <p className="text-cream-2">The family replied · see Messages below</p>
+                  : <p>Last contact: {({ sweep: "automatic check-in", check_in: "check-in", assign: "assigned", bridge_offer: "Bridge Funds offer", message: "message" } as Record<string, string>)[current.last_contact.kind]} by {current.last_contact.by}</p>)}
               </div>
             )}
             <p className="mt-5 flex gap-2 rounded-[12px] bg-navy px-3 py-2.5 text-sm text-ivory/80">
@@ -320,7 +432,29 @@ export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOu
                 ? "This family chose not to share hardship signals. You see loss and silence only."
                 : "Financial details are shared as reasons only, never balances. Every action you take is shown to the family."}
             </p>
-            <div className="mt-5 space-y-2">
+            <div className="mt-5 rounded-[14px] border border-ivory/10 p-3">
+              <p className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-ivory/70">
+                Messages <span className="normal-case tracking-normal text-ivory/50">The family sees these in looma</span>
+              </p>
+              <Thread side="staff" dark messages={livePri ? thread : []} placeholder={`Message the ${(current.name ?? "").replace(" household", "")} family…`}
+                onSend={async (t) => {
+                  if (!livePri) return (toast("Message sent"), true);
+                  const ok = await live.message(current.id, t);
+                  if (ok) setThread(await live.staffThread(current.id));
+                  else toast("That didn't send. Try again.");
+                  return ok;
+                }} />
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {([["check_in", "Send a check-in"], ["bridge_offer", "Offer Bridge Funds"]] as const).map(([k, l]) => (
+                  <button key={k} disabled={busy !== null}
+                    onClick={() => (livePri ? run(k, async () => { const ok = await live.reachOut(current.id, k); setThread(await live.staffThread(current.id)); return ok; }, "Sent. The family sees it in looma.") : (setContacted((x) => new Set(x).add(current.id)), toast("Sent")))}
+                    className="flex h-8 items-center gap-1.5 rounded-full border border-ivory/20 px-3 text-xs text-cream-2 hover:bg-raised disabled:opacity-50">
+                    <Send className="h-3 w-3" strokeWidth={1.75} /> {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mt-3 space-y-2">
               <button
                 disabled={busy !== null || current.assigned_to === me}
                 onClick={() => (livePri ? run("assign", () => live.assign(current.id, me), `You're now the adjuster for ${current.name}`) : toast(`Adjuster assigned to ${current.name}`))}
@@ -328,23 +462,11 @@ export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOu
               >
                 <UserRoundCheck className="h-4 w-4" strokeWidth={1.75} /> {current.assigned_to === me ? "Assigned to you" : current.assigned_to ? "Take over as adjuster" : "Assign to me"}
               </button>
-              <button
-                disabled={busy !== null}
-                onClick={() => (livePri ? run("reach", () => live.reachOut(current.id, "check_in"), "Check-in sent. The family sees it in looma.") : (setContacted((x) => new Set(x).add(current.id)), toast("Check-in sent")))}
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-[14px] border-[1.5px] border-ivory/40 text-cream-2 hover:bg-raised disabled:opacity-50"
-              >
-                <Send className="h-4 w-4" strokeWidth={1.75} /> Send a check-in
-              </button>
-              <button
-                disabled={busy !== null}
-                onClick={() => (livePri ? run("bridge", () => live.reachOut(current.id, "bridge_offer"), "Bridge Funds offer sent") : toast("Bridge Funds offer sent"))}
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-[14px] text-ivory/80 hover:bg-raised disabled:opacity-50"
-              >
-                <Check className="h-4 w-4" strokeWidth={1.75} /> Offer Bridge Funds
-              </button>
             </div>
           </motion.aside>
         </AnimatePresence>
+          )}
+        </div>
       </div>
     </div>
   );

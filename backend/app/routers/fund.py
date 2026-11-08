@@ -8,9 +8,10 @@ from pydantic import BaseModel, Field
 
 from ..data.synthetic import garcia_purchases
 from ..engine.bridge import bridge_offer
+from ..engine.card import KINDS, authorize, card_limit, card_view, demo_terminal, record_claim_proof
 from ..engine.disaster import bill_view, label_spending, set_disaster_mode
 from ..engine.forecast import expected_payout
-from ..models import CircleMember, HelpTransfer, Scenario
+from ..models import CardPurchase, CircleMember, HelpTransfer, Scenario
 from ..services.nessie import get_nessie
 from ..store import get_store
 from .deps import commit, load, note
@@ -219,6 +220,71 @@ async def request_help(household_id: str, body: AskIn | None = None):
     note(h, "You", f"Asked {', '.join(m.name for m in picked)} for help" + (f" (${amt:,.0f})" if amt else ""))
     await commit(h)
     return {**_circle_view(h), "asked": [m.name for m in picked], "link": f"https://looma.app/help/{h.id}"}
+
+
+# ---------- Recovery Card ----------
+
+@router.get("/card")
+async def get_card(household_id: str):
+    """The Recovery Card: Bridge Funds on a card that works at essentials only."""
+    return card_view(await load(household_id))
+
+
+@router.post("/card/activate")
+async def activate_card(household_id: str):
+    h = await load(household_id)
+    if card_limit(h) <= 0:
+        raise HTTPException(400, "Take Bridge Funds first. The card spends them.")
+    h.card.active = True
+    note(h, "Your bank", "Turned on your Recovery Card (essentials only)")
+    await commit(h)
+    return card_view(h)
+
+
+class CardBuyIn(BaseModel):
+    terminal_id: str | None = Field(None, description="One of the demo places from GET /card")
+    merchant: str | None = Field(None, max_length=60)
+    kind: str | None = Field(None, max_length=20)
+    amount: float | None = Field(None, gt=0, le=5000)
+
+
+@router.post("/card/purchase")
+async def card_purchase(household_id: str, body: CardBuyIn):
+    """Tap the card. Essentials are approved (a Nessie purchase) and added to the claim automatically;
+    anything else is declined with a reason. Declines are logged too."""
+    from .deps import now
+
+    h = await load(household_id)
+    t = next((x for x in demo_terminal(h) if x["id"] == body.terminal_id), None) if body.terminal_id else None
+    merchant = (t or {}).get("merchant") or body.merchant
+    kind = (t or {}).get("kind") or body.kind
+    amount = (t or {}).get("amount") or body.amount
+    if not merchant or not kind or not amount or kind not in KINDS:
+        raise HTTPException(400, "Pick a place, or give merchant, kind and amount.")
+    ok, why = authorize(h, merchant, kind, amount)
+    if not ok:
+        h.card.purchases.append(CardPurchase(ts=now(), merchant=merchant, kind=kind, amount=amount, approved=False, reason=why))
+        note(h, "Your bank", f"Recovery Card declined at {merchant} (${amount:,.0f})")
+        await commit(h)
+        return {"approved": False, "reason": why, "card": card_view(h)}
+    nessie = get_nessie()
+    ref = None
+    if h.nessie_checking_id and not nessie.mock:
+        mid = h.card.nessie_merchants.get(merchant) or await _mirror(nessie.create_merchant, merchant, kind, h.lat, h.lng)
+        if mid:
+            h.card.nessie_merchants[merchant] = mid
+            ref = await _mirror(nessie.create_purchase, h.nessie_checking_id, mid, amount, f"Recovery Card · {merchant}")
+    if ref is None:
+        ref = await _mirror(nessie.withdraw, h.nessie_checking_id or "mock", amount, f"Recovery Card · {merchant}")
+    h.accounts.checking = round(h.accounts.checking - amount, 2)
+    p = CardPurchase(ts=now(), merchant=merchant, kind=kind, amount=amount, approved=True, bank_ref=ref)
+    h.card.purchases.append(p)
+    p.added_to_claim, p.reason = record_claim_proof(h, kind, merchant, amount)
+    note(h, "You", f"Recovery Card at {merchant}", -amount, ref)
+    await commit(h)
+    from ..engine.claim import owed_breakdown
+    return {"approved": True, "reason": p.reason, "added_to_claim": p.added_to_claim, "bank_ref": ref,
+            "claim_extra_living": owed_breakdown(h)["extra_living_expenses"], "card": card_view(h)}
 
 
 @router.get("/cash-access")

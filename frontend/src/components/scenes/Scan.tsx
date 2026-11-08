@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, BellRing, History, Sun, Upload } from "lucide-react";
+import { ArrowRight, BellRing, History, SwitchCamera, Sun, Upload, X } from "lucide-react";
 import { Rise, Stage, useNav } from "../ui";
 import { scannedItems } from "@/lib/mock";
 import { usd } from "@/lib/format";
@@ -28,7 +28,8 @@ function liveItems(r: LScanResult): Item[] {
 }
 
 type Phase = "before" | "after";
-type Status = "idle" | "camera" | "recording" | "done";
+// preview: camera on, not recording yet (flip here) · camera: recording from the camera · recording: reading a video
+type Status = "idle" | "preview" | "camera" | "recording" | "done";
 const MAX_SECONDS = 30;
 const ROOMS = ["Office", "Living room", "Kitchen", "Main bedroom", "Garage"];
 const fmt = (d: string | null | undefined, year = false) =>
@@ -64,47 +65,91 @@ export default function Scan() {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
+  const [cams, setCams] = useState<MediaDeviceInfo[]>([]);
+  const [camId, setCamId] = useState<string | null>(null);
+  const [mirror, setMirror] = useState(false);
   const stopCamera = () => {
     stream.current?.getTracks().forEach((t) => t.stop());
     stream.current = null;
   };
   useEffect(() => () => stopCamera(), []);
+  // one <video> for preview and recording; re-attach whenever the stream changes
+  useEffect(() => {
+    if ((status === "preview" || status === "camera") && video.current && stream.current) {
+      video.current.srcObject = stream.current;
+      video.current.play().catch(() => {});
+    }
+  }, [status, camId]);
 
-  /** Real recording from the laptop or phone camera (live mode). Falls back to picking a file. */
-  async function startCamera() {
+  /** Open a camera for preview (live mode). Back camera on phones; any camera on a Mac (FaceTime, iPhone via Continuity, USB). */
+  async function startCamera(deviceId?: string) {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      toast("This browser can't record video. Pick a video instead.");
+      return fileInput.current?.click();
+    }
     try {
-      const st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      const st = await navigator.mediaDevices.getUserMedia({
+        video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 1280 } } : { facingMode: { ideal: "environment" }, width: { ideal: 1280 } },
+        audio: false,
+      });
+      stopCamera();
       stream.current = st;
-      setStatus("camera");
+      const track = st.getVideoTracks()[0];
+      const set = track?.getSettings() ?? {};
+      // selfie cameras look natural mirrored (the saved video is not mirrored)
+      setMirror(set.facingMode === "user" || (!set.facingMode && /facetime|front|built-in/i.test(track?.label ?? "")));
+      setCamId(set.deviceId ?? deviceId ?? "default");
+      setCams((await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput"));
       setSecs(0);
-      setTimeout(() => {
-        if (video.current) {
-          video.current.srcObject = st;
-          video.current.play().catch(() => {});
-        }
-      }, 50);
-      const type = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"].find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
-      const rec = new MediaRecorder(st, type ? { mimeType: type } : undefined);
-      const chunks: Blob[] = [];
-      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-      rec.onstop = () => {
-        stopCamera();
-        const mime = rec.mimeType || "video/webm";
-        const file = new File([new Blob(chunks, { type: mime })], `${liveRoom}-${phase}.${mime.includes("mp4") ? "mp4" : "webm"}`, { type: mime });
-        upload(file);
-      };
-      recorder.current = rec;
-      rec.start(500);
-      timers.current.push(setTimeout(() => rec.state === "recording" && rec.stop(), MAX_SECONDS * 1000));
+      setStatus("preview");
     } catch {
       toast("Camera isn't available here. Pick a video instead.");
       fileInput.current?.click();
     }
   }
+
+  /** Switch to the next camera (front/back on phones; FaceTime/iPhone/USB on a Mac). */
+  function flipCamera() {
+    if (cams.length < 2) return;
+    const i = cams.findIndex((c) => c.deviceId === camId);
+    startCamera(cams[(i + 1) % cams.length].deviceId);
+  }
+
+  function startRecording() {
+    const st = stream.current;
+    if (!st) return;
+    const type = ["video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
+    const rec = new MediaRecorder(st, type ? { mimeType: type } : undefined);
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    rec.onstop = () => {
+      stopCamera();
+      if (rec.ondataavailable === null) return; // cancelled
+      const mime = (rec.mimeType || "video/webm").split(";")[0];
+      const file = new File([new Blob(chunks, { type: mime })], `${liveRoom}-${phase}.${mime.includes("mp4") ? "mp4" : "webm"}`, { type: mime });
+      upload(file);
+    };
+    recorder.current = rec;
+    rec.start(500);
+    setSecs(0);
+    setStatus("camera");
+    timers.current.push(setTimeout(() => rec.state === "recording" && rec.stop(), MAX_SECONDS * 1000));
+  }
   const stopRecording = () => recorder.current?.state === "recording" && recorder.current.stop();
+  /** Leave the camera without saving anything. */
+  function cancelCamera() {
+    const r = recorder.current;
+    if (r && r.state === "recording") {
+      r.ondataavailable = null;
+      r.stop();
+    }
+    recorder.current = null;
+    stopCamera();
+  }
 
   const reset = (p: Phase) => {
     timers.current.forEach(clearTimeout);
+    cancelCamera();
     setPhase(p);
     setStatus("idle");
     setShown(0);
@@ -270,18 +315,42 @@ export default function Scan() {
             <span key={c} className={`absolute h-10 w-10 rounded-sm border-butter/70 ${c}`} />
           ))}
 
-          {status === "camera" && (
+          {(status === "preview" || status === "camera") && (
             <>
-              <video ref={video} muted playsInline className="absolute inset-0 h-full w-full object-cover" />
-              <div className="absolute left-8 top-8 flex items-center gap-2 rounded-full bg-navy/60 px-4 py-1.5 text-sm font-medium text-butter">
-                <motion.span className="h-2 w-2 rounded-full bg-clay" animate={{ opacity: [1, 0.2, 1] }} transition={{ duration: 1, repeat: Infinity }} />
-                REC 0:{String(secs).padStart(2, "0")} / 0:{MAX_SECONDS}
-              </div>
-              <div className="absolute inset-x-0 bottom-8 flex flex-col items-center gap-2">
-                <button onClick={stopRecording} aria-label="Stop recording" className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-butter/80 bg-navy/30 backdrop-blur">
-                  <span className="h-8 w-8 rounded-md bg-clay" />
+              <video ref={video} muted playsInline className={`absolute inset-0 h-full w-full object-cover ${mirror ? "-scale-x-100" : ""}`} />
+              {status === "camera" ? (
+                <div className="absolute left-8 top-8 flex items-center gap-2 rounded-full bg-navy/60 px-4 py-1.5 text-sm font-medium text-butter">
+                  <motion.span className="h-2 w-2 rounded-full bg-clay" animate={{ opacity: [1, 0.2, 1] }} transition={{ duration: 1, repeat: Infinity }} />
+                  REC 0:{String(secs).padStart(2, "0")} / 0:{MAX_SECONDS}
+                </div>
+              ) : (
+                <button onClick={() => (cancelCamera(), setStatus("idle"))} aria-label="Close camera" className="absolute left-8 top-8 flex h-10 w-10 items-center justify-center rounded-full bg-navy/60 text-butter backdrop-blur hover:bg-navy/80">
+                  <X className="h-5 w-5" />
                 </button>
-                <span className="rounded-full bg-navy/60 px-3 py-1 text-xs text-butter">Walk slowly. Tap to finish.</span>
+              )}
+              <div className="absolute inset-x-0 bottom-8 flex flex-col items-center gap-2">
+                <div className="relative flex items-center justify-center">
+                  {status === "preview" ? (
+                    <button onClick={startRecording} aria-label="Start recording" className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-butter/80 bg-navy/20 backdrop-blur transition hover:scale-105">
+                      <span className="h-14 w-14 rounded-full bg-clay" />
+                    </button>
+                  ) : (
+                    <button onClick={stopRecording} aria-label="Stop recording" className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-butter/80 bg-navy/30 backdrop-blur">
+                      <span className="h-8 w-8 rounded-md bg-clay" />
+                    </button>
+                  )}
+                  {status === "preview" && cams.length > 1 && (
+                    <button onClick={flipCamera} aria-label="Switch camera" title="Switch camera"
+                      className="absolute left-full ml-6 flex h-12 w-12 items-center justify-center rounded-full bg-navy/60 text-butter backdrop-blur transition hover:bg-navy/80">
+                      <SwitchCamera className="h-5 w-5" strokeWidth={1.75} />
+                    </button>
+                  )}
+                </div>
+                <span className="rounded-full bg-navy/60 px-3 py-1 text-xs text-butter">
+                  {status === "preview"
+                    ? `${cams.find((c) => c.deviceId === camId)?.label.replace(/\s*\(.*\)$/, "") || "Camera"} · tap to start`
+                    : "Walk slowly. Tap to finish."}
+                </span>
               </div>
             </>
           )}

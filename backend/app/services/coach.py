@@ -171,7 +171,7 @@ FOLLOW_UPS = {
     "next": ["What do I have?", "What if my claim takes six weeks?"],
     "step": ["What should I do after that?", "What do I have?"],
 }
-STEP_SCREENS = {"file_claim": "claim", "unlock_bridge": "fund", "mortgage_pause": "bills"}
+STEP_SCREENS = {"file_claim": "claim", "unlock_bridge": "fund", "mortgage_pause": "bills", "recovery_card": "card"}
 
 
 def _step_detail(h: Household, st: dict, fc: dict) -> tuple[str, dict, list[dict]]:
@@ -197,6 +197,10 @@ def _step_detail(h: Household, st: dict, fc: dict) -> tuple[str, dict, list[dict
         text = (f"Call your lender and ask for a disaster payment pause. It frees ${m:,.0f} this month. Ask: is it reported "
                 "to credit bureaus, are late fees waived, and how are paused payments repaid?")
         return text, {"mortgage_monthly": m}, [{"label": "See my bills", "go": "bills"}]
+    if sid == "recovery_card":
+        return ("Open Recovery card and turn it on. It spends your Bridge Funds at hotels, groceries, restaurants, pharmacies and gas only, "
+                "and every hotel night or meal above your normal spending is added to your claim the moment you pay.",
+                {}, [{"label": "Open my Recovery Card", "go": "card"}])
     if sid.startswith("rescan_"):
         room = sid.removeprefix("rescan_")
         return (f"Walk the {room} slowly for 30 seconds on the same path as your home record. looma lists what changed.",

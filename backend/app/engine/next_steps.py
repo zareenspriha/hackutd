@@ -39,6 +39,11 @@ def compute_next_steps(h: Household, s: Scenario | None = None, fc: dict | None 
         steps.append(_step("unlock_bridge", 3, f"Unlock ${bridge:,.0f} in Bridge Funds",
                            "Repaid automatically when insurance pays. No interest, no payday loan.", "/bridge"))
 
+    # 3b. Bridge Funds taken, card not on yet
+    if h.bridge.disbursed and not h.bridge.repaid and not h.card.active:
+        steps.append(_step("recovery_card", 3, "Turn on your Recovery Card",
+                           "Pay for the hotel and food with it, and each purchase is added to your claim automatically.", "/card"))
+
     # 4. bills to pay now / 5. mortgage pause
     pday = fc["payout_day"]
     mortgage_hits = sum(1 for d in fc["days"] for e in d["events"] if e["label"] == "Mortgage" and d["day"] <= pday)

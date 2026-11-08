@@ -1,4 +1,4 @@
-import { ArrowLeftRight, CalendarClock, FileCheck2, HandCoins, HandHeart, Home, MessageCircle, ScanLine, Sparkles, Wallet } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CreditCard, FileCheck2, HandCoins, HandHeart, Home, MessageCircle, ScanLine, Sparkles, Wallet } from "lucide-react";
 import type { SceneId } from "./ui";
 
 type Item = { id: SceneId; label: string; icon: typeof Home };
@@ -16,6 +16,7 @@ export const PILLARS: Pillar[] = [
     key: "fund", n: 2, title: "Get money now", blurb: "Cash today, repaid when the claim pays.",
     items: [
       { id: "fund", label: "Bridge funds", icon: HandCoins },
+      { id: "card", label: "Recovery card", icon: CreditCard },
       { id: "bills", label: "Bills", icon: CalendarClock },
       { id: "circle", label: "Help circle", icon: HandHeart },
     ],
