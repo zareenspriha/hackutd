@@ -47,7 +47,7 @@ async def disburse_bridge(household_id: str, body: DisburseIn | None = None):
     nessie = get_nessie()
     txn = await _mirror(nessie.deposit, h.nessie_checking_id or "mock", amount, "Looma Bridge Funds advance")
     h.accounts.checking += amount
-    h.bridge.amount = amount
+    h.bridge.amount = round(h.bridge.amount + amount if h.bridge.disbursed else amount, 2)
     h.bridge.disbursed = True
     await commit(h)
     return {**bridge_offer(h), "checking": h.accounts.checking, "nessie_transaction_id": txn}

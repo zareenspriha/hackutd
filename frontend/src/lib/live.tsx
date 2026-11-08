@@ -34,7 +34,7 @@ export type LClaim = {
   expected_days_to_pay: number; losses: LLoss[]; damage: { description: string; area: string; estimated_cost: number }[]; receipts: LReceipt[];
 };
 export type LBridge = {
-  eligible: boolean; amount: number; disbursed: boolean; repaid: boolean; reason: string; documented_losses: number;
+  eligible: boolean; amount: number; limit: number; drawn: number; remaining: number; disbursed: boolean; repaid: boolean; reason: string; documented_losses: number;
   limits: { forty_pct_of_losses: number; sixty_days_essentials: number; cap: number };
 };
 export type LDay = { day: number; balance: number; events: { label: string; amount: number }[] };
