@@ -153,7 +153,7 @@ backend/tests/ end-to-end demo flow
 |---|---|
 | today | `GET /households/garcia` (includes `next_steps`), `GET /households/garcia/next-steps` |
 | scan a room | `POST /households/garcia/scan` (form: `room`, `phase=before\|after`, `video`) |
-| what changed / my claim | `GET /households/garcia/claim`, `POST /households/garcia/losses/review` |
+| what changed / my claim | `GET /households/garcia/items`, `GET /households/garcia/claim`, `POST /households/garcia/losses/review` |
 | bridge funds | `GET /households/garcia/bridge`, `POST /households/garcia/bridge/disburse` |
 | bills | `GET /households/garcia/bills` |
 | help circle | `POST /households/garcia/help-circle` `{"from_name", "amount"}` |
@@ -164,16 +164,19 @@ backend/tests/ end-to-end demo flow
 
 Full list in [backend/README.md](backend/README.md) and at `/docs`.
 
-### Connecting frontend and backend (to do)
-`frontend/src/lib/api.ts` currently calls a few paths that don't match the backend, so those calls quietly use mock data:
+### How the frontend talks to the backend
+`frontend/src/lib/api.ts` calls the endpoints above and converts the backend's snake_case replies into the shapes in `src/lib/types.ts`. If `NEXT_PUBLIC_API_URL` is unset or a call fails, it returns mock data instead.
 
-| Frontend calls | Backend has |
+| `api.*` | Backend endpoint |
 |---|---|
-| `GET /households/{id}/items` | `GET /households/{id}/claim` (losses) or the `items` returned by `POST /scan` |
-| `POST /households/{id}/bridge-funds` | `POST /households/{id}/bridge/disburse` |
-| `POST /households/{id}/coach` `{ message }` | same path, body `{ question }`; reply uses `next_step` |
-| `GET /households/{id}/next-steps` → list | returns `{ next_steps: [...] }` |
-| `GET /priority` | `GET /insurer/households` → `{ households: [...] }` |
+| `household()` | `/households/{id}` + `/accounts`, `/bills`, `/health`, `/claim`, `/bridge` |
+| `nextSteps(id, scenario?)` | `GET /households/{id}/next-steps?claim_delay_days=&payout_pct=&missed_work_days=` |
+| `items()` | `GET /households/{id}/items` (proof frames via `/frame`) |
+| `priority()` | `GET /insurer/households` (score split into severity / fragility / silence) |
+| `unlockBridgeFunds()` | `POST /households/{id}/bridge/disburse` |
+| `coach(id, message)` | `POST /households/{id}/coach` `{ question }` |
+
+Right now **ask looma** and **bridge funds** call the API; the other screens still read `src/lib/mock.ts` directly.
 
 ---
 

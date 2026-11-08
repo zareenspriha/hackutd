@@ -177,7 +177,7 @@ async def insurance_payout(household_id: str, payout_pct: float = 1.0):
     amount = expected_payout(h, Scenario(payout_pct=payout_pct))
     nessie = get_nessie()
     acct = h.nessie_checking_id or "mock"
-    await _mirror(nessie.deposit, acct, amount, "State Farm claim payout")
+    await _mirror(nessie.deposit, acct, amount, "Insurance claim payout")
     h.accounts.checking += amount
     repaid = 0.0
     if h.bridge.disbursed and not h.bridge.repaid:

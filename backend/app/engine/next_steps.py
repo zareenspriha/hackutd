@@ -20,7 +20,7 @@ def compute_next_steps(h: Household, s: Scenario | None = None, fc: dict | None 
 
     # 1. claim not filed
     if h.disaster_mode and not h.claim.filed:
-        steps.append(_step("file_claim", 1, "File your claim with State Farm today",
+        steps.append(_step("file_claim", 1, "File your insurance claim today",
                            "Every day you wait pushes back your payout.", "/claim/file"))
 
     # 2. rooms scanned before but not after

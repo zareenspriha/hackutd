@@ -156,6 +156,27 @@ async def add_receipt(household_id: str, photo: UploadFile = File(...)):
     return {"receipt": r.model_dump(), "claim": claim_summary(h)}
 
 
+@router.get("/items")
+async def items(household_id: str):
+    """Every scanned item (from the 'before' videos), marked missing/damaged when it's on the loss list."""
+    h = await load(household_id)
+    losses = {(l.room, l.name): l for l in h.claim.losses}
+    out = []
+    for s in h.scans:
+        if s.phase != "before":
+            continue
+        for i, it in enumerate(s.items):
+            l = losses.get((s.room, it.name))
+            out.append({
+                "id": f"{s.room}:{i}", "room": s.room, "name": it.name, "category": it.category,
+                "condition": "good" if l is None else ("missing" if l.status == "missing" else "damaged"),
+                "replacement_cost": it.replacement_cost, "actual_cash_value": it.actual_cash_value,
+                "before_frame_ts": it.frame_ts, "after_frame_ts": l.after_frame_ts if l else None,
+                "has_video": bool(s.video_path),
+            })
+    return {"items": out}
+
+
 @router.get("/claim")
 async def get_claim(household_id: str):
     return claim_summary(await load(household_id))

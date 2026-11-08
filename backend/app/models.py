@@ -145,6 +145,7 @@ class Household(BaseModel):
     # pre-computed for the map (cheap for 2,000 rows)
     priority_score: float = 0.0
     priority_reasons: list[str] = []
+    priority_parts: dict[str, float] = {}  # severity / fragility / silence points
     documented_loss: float = 0.0
 
 

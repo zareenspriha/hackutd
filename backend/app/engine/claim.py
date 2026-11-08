@@ -61,7 +61,7 @@ def missing_pieces(h: Household) -> list[str]:
     if h.disaster_mode and not h.claim.receipts:
         out.append("Snap receipts for hotels, meals and travel since the disaster")
     if not h.claim.filed:
-        out.append("File your claim with State Farm")
+        out.append("File your insurance claim")
     return out
 
 
