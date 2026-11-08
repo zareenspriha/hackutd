@@ -7,6 +7,23 @@ import { useDemo } from "../demo";
 import { EASE, Rise } from "../ui";
 import { garcias } from "@/lib/mock";
 import { shortDate, usd } from "@/lib/format";
+import { useLive, type LBill } from "@/lib/live";
+
+type Card = { id: string; name: string; amount: number; due: string; tag: "pay" | "move" | "call"; why: string; action: string; script?: string; mortgage?: boolean };
+
+/** A backend bill as a card, with plain-language why, action and call script. */
+function liveCard(b: LBill): Card {
+  const due = new Date(Date.now() + b.due_in_days * 86_400_000).toISOString().slice(0, 10);
+  const base = { id: b.id, name: b.payee, amount: b.amount, due };
+  if (b.kind === "mortgage")
+    return { ...base, tag: "call", mortgage: true, why: `Ask for a disaster payment pause. Could save ${usd(b.amount)}.`, action: "Get call script",
+      script: "“Our home was damaged in the recent flood. Do you offer disaster forbearance, and can you waive late fees during the pause?”" };
+  if (b.label === "call_about")
+    return { ...base, tag: "call", why: "Ask to move the due date until the claim pays.", action: "Get call script",
+      script: `“Hi, our home flooded this week. Can you waive fees or move my ${b.payee.toLowerCase()} due date?”` };
+  if (b.label === "move") return { ...base, tag: "move", why: "Can wait until the claim pays.", action: "Move to after the payout" };
+  return { ...base, tag: "pay", why: "Keeps it current. Late fees are paused while Disaster Mode is on.", action: `Pay ${usd(b.amount)}` };
+}
 
 const meta: Record<string, { tag: "pay" | "move" | "call"; why: string; action: string; script?: string }> = {
   b1: { tag: "pay", why: "Missing it hurts your credit. Bridge Funds cover it.", action: "Pay $380" },
@@ -22,11 +39,24 @@ const tag = {
 
 /** Disaster Mode bills: one bill in focus at a time, the rest wait their turn. */
 export default function Bills() {
-  const { toast } = useDemo();
+  const { toast, set } = useDemo();
+  const live = useLive();
   const [done, setDone] = useState<string[]>([]);
   const [script, setScript] = useState<string | null>(null);
-  const left = garcias.bills.filter((b) => !done.includes(b.id));
+  const cards: Card[] = live.data
+    ? live.data.bills.filter((b) => b.label && b.status === "pending").map(liveCard)
+    : garcias.bills.map((b) => ({ ...b, ...meta[b.id], mortgage: b.id === "b3" }));
+  const left = cards.filter((b) => !done.includes(b.id));
   const current = left[0];
+
+  function complete(c: Card) {
+    setDone((d) => [...d, c.id]);
+    setScript(null);
+    if (c.mortgage) set({ mortgageCalled: true });
+    else if (c.tag === "pay") live.billAction(c.id, "pay");
+    else if (c.tag === "move") live.billAction(c.id, "move");
+    toast(`${c.name}: ${script ? "call logged" : c.action}`);
+  }
 
   return (
     <div className="mx-auto flex min-h-full max-w-[760px] flex-col justify-center px-10 pb-28 pt-12">
@@ -40,8 +70,7 @@ export default function Bills() {
       <div className="relative mt-10 h-[260px]">
         <AnimatePresence>
           {left.map((b, i) => {
-            const m = meta[b.id];
-            const t = tag[m.tag];
+            const t = tag[b.tag];
             if (i > 2) return null;
             return (
               <motion.div
@@ -63,7 +92,7 @@ export default function Bills() {
                   <p className="text-[34px] font-light text-navy">{b.name}</p>
                   <p className="tnum text-[44px] font-light leading-none text-navy">{usd(b.amount)}</p>
                 </div>
-                <p className="mt-2 text-dusty-deep">{m.why}</p>
+                <p className="mt-2 text-dusty-deep">{b.why}</p>
               </motion.div>
             );
           })}
@@ -86,20 +115,13 @@ export default function Bills() {
 
       {current && (
         <div className="mt-6 flex gap-3">
-          {meta[current.id].script && !script ? (
-            <button onClick={() => setScript(meta[current.id].script!)} className="pill-dark h-[52px] flex-1 rounded-[14px]">
-              {meta[current.id].action}
+          {current.script && !script ? (
+            <button onClick={() => setScript(current.script!)} className="pill-dark h-[52px] flex-1 rounded-[14px]">
+              {current.action}
             </button>
           ) : (
-            <button
-              onClick={() => {
-                setDone((d) => [...d, current.id]);
-                setScript(null);
-                toast(`${current.name}: ${script ? "call logged" : meta[current.id].action}`);
-              }}
-              className="pill-dark h-[52px] flex-1 rounded-[14px]"
-            >
-              {script ? "I made the call" : meta[current.id].action}
+            <button onClick={() => complete(current)} className="pill-dark h-[52px] flex-1 rounded-[14px]">
+              {script ? "I made the call" : current.action}
             </button>
           )}
           <button onClick={() => (setDone((d) => [...d, current.id]), setScript(null))} className="pill-light h-[52px] rounded-[14px]">

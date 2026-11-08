@@ -26,5 +26,7 @@ def scenario(
     claim_delay_days: int | None = Query(None, ge=1, le=120, description="What if the claim pays on this day instead"),
     payout_pct: float = Query(1.0, ge=0.0, le=1.0, description="What if insurance pays only this share"),
     missed_work_days: int = Query(0, ge=0, le=60, description="What if I miss this many work days"),
+    mortgage_pause: bool = Query(False, description="What if the lender pauses one mortgage payment"),
 ) -> Scenario:
-    return Scenario(claim_delay_days=claim_delay_days, payout_pct=payout_pct, missed_work_days=missed_work_days)
+    return Scenario(claim_delay_days=claim_delay_days, payout_pct=payout_pct, missed_work_days=missed_work_days,
+                    mortgage_pause=mortgage_pause)

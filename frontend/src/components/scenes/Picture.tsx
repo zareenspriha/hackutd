@@ -4,7 +4,54 @@ import { AnimatePresence, motion } from "motion/react";
 import { ArrowRight, Banknote, CreditCard, Lock, PiggyBank } from "lucide-react";
 import { useDemo } from "../demo";
 import { Assumptions, EASE, Rise, StatusPill, useNav } from "../ui";
-import { comingIn, have, indicators, ladder, owe, type AccountRow } from "@/lib/demoData";
+import { comingIn, have, indicators, ladder, owe, type AccountRow, type Indicator, type Rung } from "@/lib/demoData";
+import { account, statusOf, useLive, type LiveData } from "@/lib/live";
+import { usd } from "@/lib/format";
+
+const dateIn = (days: number) => new Date(Date.now() + days * 86_400_000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+/** Backend data in the shapes this scene draws. */
+function liveView(d: LiveData) {
+  const a = (k: string) => account(d, k);
+  const bridgeLeft = d.bridge.eligible ? d.bridge.amount : 0;
+  const help = d.home.help_circle.reduce((t, g) => t + g.amount, 0);
+  const have: AccountRow[] = [
+    { id: "chk", name: "Checking", amount: usd(a("checking")?.amount ?? 0), source: "bank" },
+    { id: "sav", name: "Savings", amount: usd(a("savings")?.amount ?? 0), source: "bank" },
+    { id: "cd", name: "CD", amount: usd(a("cd")?.amount ?? 0), note: `matures in ${a("cd")?.matures_in_weeks ?? 0} weeks`, source: "profile" },
+    { id: "ira", name: "IRA", amount: usd(a("ira")?.amount ?? 0), note: "early withdrawal costs taxes and penalties", source: "profile" },
+  ];
+  const owe: AccountRow[] = [
+    { id: "cc", name: "Credit card", amount: usd(a("credit_card")?.amount ?? 0), note: `of ${usd(a("credit_card")?.limit ?? 0)} limit`, source: "bank" },
+    { id: "auto", name: "Auto loan", amount: `${usd(a("auto_loan")?.monthly_payment ?? 0)}/mo`, source: "profile" },
+    ...((a("personal_loan")?.monthly_payment ?? 0) > 0 ? [{ id: "pl", name: "Personal loan", amount: `${usd(a("personal_loan")!.monthly_payment!)}/mo`, source: "profile" as const }] : []),
+    { id: "mort", name: "Mortgage", amount: `${usd(a("mortgage")?.monthly_payment ?? 0)}/mo`, source: "profile" },
+  ];
+  const coming: AccountRow[] = [
+    { id: "bf", name: "Bridge Funds", amount: d.bridge.disbursed ? `${usd(d.bridge.amount)} received` : bridgeLeft ? `${usd(bridgeLeft)} available` : "after you add proof", source: "bank" },
+    { id: "hc", name: "Help Circle", amount: help ? `${usd(help)} received` : "$0 so far", source: "bank" },
+    { id: "ins", name: "Insurance payout", amount: `${usd(d.forecast.expected_payout)} expected`, note: `around ${dateIn(d.forecast.payout_day)}`, source: "profile" },
+  ];
+  const h = d.health;
+  const ind: Indicator[] = [
+    { key: "runway", label: "Your money lasts", value: d.forecast.runway_days == null ? "until the claim pays" : `${d.forecast.runway_days} days`, status: statusOf(h.runway.status), explanation: h.runway.text, assumptions: d.forecast.assumptions },
+    { key: "deductible", label: "Deductible covered", value: `${usd(a("savings")?.amount ?? 0)} of ${usd(d.home.deductible)}`, status: statusOf(h.deductible.status), explanation: h.deductible.text, assumptions: ["The deductible comes out of the payout", `Savings balance today: ${usd(a("savings")?.amount ?? 0)}`] },
+    { key: "bills", label: "Bills at risk", value: `${h.bills_at_risk.value} bill${h.bills_at_risk.value === 1 ? "" : "s"}`, status: statusOf(h.bills_at_risk.status), explanation: h.bills_at_risk.text, assumptions: ["Due dates from your accounts", `Claim pays around ${dateIn(d.forecast.payout_day)}`] },
+    { key: "debt", label: "Debt pressure", value: `${h.debt_pressure.value}% of income`, status: statusOf(h.debt_pressure.status), explanation: h.debt_pressure.text, assumptions: ["Loan, mortgage and minimum card payments", "Compared with monthly income"] },
+  ];
+  const kind = { use: "use", ask: "ask", essentials_only: "limited", protect: "protect" } as const;
+  const held: Record<string, string> = { cd: usd(a("cd")?.amount ?? 0), ira: usd(a("ira")?.amount ?? 0) };
+  const rungs: Rung[] = d.ladder.map((r) => ({
+    order: r.rank,
+    label: r.name,
+    amount: r.action === "protect" ? held[r.key] ?? "" : r.action === "ask" ? (r.available ? `saves ${usd(r.available)}` : "done") : usd(r.available),
+    kind: kind[r.action],
+    note: r.text,
+  }));
+  const spendable = (a("checking")?.amount ?? 0) + (a("savings")?.amount ?? 0);
+  const onTheWay = d.forecast.expected_payout + bridgeLeft;
+  return { have, owe, coming, ind, rungs, spendable, onTheWay };
+}
 
 type Tab = "have" | "health" | "ladder";
 const tabs: { id: Tab; label: string; q: string }[] = [
@@ -25,19 +72,25 @@ const rungTag = { use: "Use first", ask: "Ask", limited: "Essentials only", prot
 export default function Picture() {
   const { go } = useNav();
   const { s } = useDemo();
+  const { data: d } = useLive();
   const [tab, setTab] = useState<Tab>("have");
-  const ind = indicators(s.bridgeTaken, s.sisterSent, s.paycheckDelayed);
-  const spendable = 1540 + (s.bridgeTaken ? 2480 : 0) + (s.sisterSent ? 200 : 0);
+  const v = d
+    ? liveView(d)
+    : {
+        have, owe, coming: comingIn(s.bridgeTaken, s.sisterSent), ind: indicators(s.bridgeTaken, s.sisterSent, s.paycheckDelayed), rungs: ladder,
+        spendable: 1540 + (s.bridgeTaken ? 2480 : 0) + (s.sisterSent ? 200 : 0), onTheWay: s.bridgeTaken ? 8420 : 10900,
+      };
+  const { ind, spendable } = v;
 
   return (
     <div className="mx-auto min-h-full max-w-[960px] px-10 pb-28 pt-12">
       <Rise>
         <p className="eyebrow">My money</p>
         <h1 className="headline mt-4 text-[60px]">
-          You can spend <span className="tnum">${spendable.toLocaleString()}</span>
+          You can spend <span className="tnum">${Math.round(spendable).toLocaleString()}</span>
           <span className="text-dusty"> today.</span>
         </h1>
-        <p className="mt-3 text-lg text-dusty-deep">Without touching your CD or IRA. ${s.bridgeTaken ? "8,420" : "10,900"} more is on the way.</p>
+        <p className="mt-3 text-lg text-dusty-deep">Without touching your CD or IRA. {usd(v.onTheWay)} more is on the way.</p>
       </Rise>
 
       <Rise delay={0.15} className="mt-8 inline-flex rounded-full border border-midnight/10 bg-cream-2/70 p-1.5" >
@@ -54,9 +107,9 @@ export default function Picture() {
           <motion.div key={tab} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.28, ease: EASE }}>
             {tab === "have" && (
               <div className="grid grid-cols-3 gap-4">
-                <Group title="Money you have" rows={have} icon={PiggyBank} />
-                <Group title="What you owe" rows={owe} icon={CreditCard} />
-                <Group title="Coming in" rows={comingIn(s.bridgeTaken, s.sisterSent)} icon={Banknote} />
+                <Group title="Money you have" rows={v.have} icon={PiggyBank} />
+                <Group title="What you owe" rows={v.owe} icon={CreditCard} />
+                <Group title="Coming in" rows={v.coming} icon={Banknote} />
               </div>
             )}
             {tab === "health" && (
@@ -77,7 +130,7 @@ export default function Picture() {
             {tab === "ladder" && (
               <div className="grid grid-cols-[1fr_280px] gap-6">
                 <ol className="space-y-2">
-                  {ladder.map((r, i) => (
+                  {v.rungs.map((r, i) => (
                     <motion.li key={r.order} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05, duration: 0.28, ease: EASE }} className={`rounded-[16px] px-5 py-3.5 ${rungStyle[r.kind]}`}>
                       <div className="flex items-center justify-between gap-2">
                         <p className="flex items-center gap-2 text-[17px] font-medium">

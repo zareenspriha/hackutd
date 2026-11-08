@@ -9,6 +9,7 @@ import Cat from "./Cat";
 import { NavCtx, SCENES, type SceneId } from "./ui";
 import { PILLARS, pillarOf } from "./pillars";
 import { DemoProvider, useDemo } from "./demo";
+import { LiveProvider } from "@/lib/live";
 import Landing from "./scenes/Title";
 import Today from "./scenes/Today";
 import Scan from "./scenes/Scan";
@@ -31,9 +32,11 @@ const view: Record<SceneId, React.ComponentType> = {
 export default function LoomaApp() {
   return (
     <MotionConfig reducedMotion="user">
-      <DemoProvider>
-        <Shell />
-      </DemoProvider>
+      <LiveProvider>
+        <DemoProvider>
+          <Shell />
+        </DemoProvider>
+      </LiveProvider>
     </MotionConfig>
   );
 }

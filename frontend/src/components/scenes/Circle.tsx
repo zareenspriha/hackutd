@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { ArrowRight, CheckCircle2, CircleDashed, Share2 } from "lucide-react";
 import { useDemo } from "../demo";
@@ -6,14 +7,44 @@ import { EASE, Rise, Stage, useNav } from "../ui";
 import { atms, circle } from "@/lib/demoData";
 import { forecast } from "@/lib/mock";
 import { usd } from "@/lib/format";
+import { useLive, type LForecast, type LiveData } from "@/lib/live";
+
+type Atm = { name: string; dist: string; open: boolean; x: number; y: number };
+
+/** Live ATMs placed around the family's location (the pulsing dot sits at 48%, 52%). */
+function liveAtms(d: LiveData): Atm[] {
+  const all = [...d.cash.working.slice(0, 4), ...d.cash.out_of_service.slice(0, 2)];
+  const span = Math.max(0.01, ...all.map((a) => Math.max(Math.abs(a.lat - d.home.lat), Math.abs(a.lng - d.home.lng)))) * 2.4;
+  return all
+    .sort((a, b) => a.distance_km - b.distance_km)
+    .map((a) => ({
+      name: a.name,
+      dist: `${(a.distance_km / 1.609).toFixed(1)} mi`,
+      open: a.working,
+      x: Math.min(94, Math.max(6, 48 + ((a.lng - d.home.lng) / span) * 100)),
+      y: Math.min(90, Math.max(10, 52 - ((a.lat - d.home.lat) / span) * 100)),
+    }));
+}
 
 export default function Circle() {
   const { go } = useNav();
   const { s, set, toast } = useDemo();
+  const live = useLive();
+  const d = live.data;
+  const [fc, setFc] = useState<LForecast | null>(null);
+  useEffect(() => {
+    if (!d) return;
+    live.forecast({ claimDelayDays: 42, missedWorkDays: s.paycheckDelayed ? 14 : 0 }).then(setFc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d, s.paycheckDelayed]);
 
   // Gap comes from the forecast (6-week claim, today's state).
-  const pts = forecast(6, 1, s.paycheckDelayed ? 2 : 0, s.bridgeTaken ? 2480 : 0).map((p) => ({ ...p, balance: p.balance + (s.sisterSent ? 200 : 0) }));
+  const pts = fc
+    ? fc.days.filter((p) => p.day <= fc.payout_day)
+    : forecast(6, 1, s.paycheckDelayed ? 2 : 0, s.bridgeTaken ? 2480 : 0).map((p) => ({ ...p, balance: p.balance + (s.sisterSent ? 200 : 0) }));
   const low = pts.reduce((m, p) => (p.balance < m.balance ? p : m), pts[0]);
+  const atmList = d ? liveAtms(d) : atms;
+  const gifts = d ? d.home.help_circle : [];
   const gap = Math.max(0, Math.ceil(-low.balance / 50) * 50);
   const when = new Date(new Date("2026-11-08T12:00:00").getTime() + low.day * 86400000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
@@ -49,7 +80,9 @@ export default function Circle() {
             <p className="eyebrow">Your circle</p>
             <ul className="mt-3 space-y-3">
               {circle.map((p) => {
-                const sent = p.rel === "sister" ? (s.sisterSent ? 200 : 0) : p.sent;
+                const sent = d
+                  ? gifts.filter((g) => g.from_name === p.name).reduce((a, g) => a + g.amount, 0)
+                  : p.rel === "sister" ? (s.sisterSent ? 200 : 0) : p.sent;
                 return (
                   <li key={p.name} className="flex items-center gap-3">
                     <span className="flex h-11 w-11 items-center justify-center rounded-full bg-ivory text-sm font-semibold text-midnight">{p.initials}</span>
@@ -91,7 +124,7 @@ export default function Circle() {
               <path d="M0,40 C20,36 30,46 50,40 S80,30 100,34" stroke="#bdc4d4" strokeWidth={3} fill="none" />
               <rect x="62" y="4" width="14" height="10" rx="1" fill="#6e9277" opacity="0.25" />
             </svg>
-            {atms.map((a) => (
+            {atmList.map((a) => (
               <div key={a.name} className="absolute -translate-x-1/2 -translate-y-full" style={{ left: `${a.x}%`, top: `${a.y}%` }}>
                 <svg width="22" height="28" viewBox="0 0 22 28" aria-hidden>
                   <path d="M11 27s9-9.2 9-15.5A9 9 0 1 0 2 11.5C2 17.8 11 27 11 27z" fill={a.open ? "#1c2e4a" : "#8a93a3"} />
@@ -106,7 +139,7 @@ export default function Circle() {
             <span className="absolute bottom-4 left-4 rounded-full bg-midnight/80 px-3 py-1 text-xs text-cream-2">You · Hotel on Preston Rd</span>
           </div>
           <ul className="mt-4 space-y-2">
-            {atms.map((a) => (
+            {atmList.map((a) => (
               <li key={a.name} className="flex items-center gap-4 rounded-[16px] border border-navy/[0.08] bg-cream px-5 py-3">
                 <span className="tnum w-14 text-sm text-dusty-deep">{a.dist}</span>
                 <span className="flex-1 text-navy">{a.name}</span>

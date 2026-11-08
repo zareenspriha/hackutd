@@ -155,3 +155,4 @@ class Scenario(BaseModel):
     claim_delay_days: int | None = None  # override expected days to pay
     payout_pct: float = 1.0  # 0.7 = insurance pays 70%
     missed_work_days: int = 0
+    mortgage_pause: bool = False  # what if the lender pauses one mortgage payment

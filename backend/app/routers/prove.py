@@ -156,6 +156,23 @@ async def add_receipt(household_id: str, photo: UploadFile = File(...)):
     return {"receipt": r.model_dump(), "claim": claim_summary(h)}
 
 
+class ReceiptIn(BaseModel):
+    merchant: str
+    category: Literal["food", "lodging", "transport", "other"]
+    total: float
+    days_covered: int = 7
+
+
+@router.post("/receipt/manual")
+async def add_receipt_manual(household_id: str, body: ReceiptIn):
+    """Add a receipt typed in by hand (same 'above normal spending' rule as a photo)."""
+    h = await load(household_id)
+    r = apply_ale_rule(h, Receipt(**body.model_dump()))
+    h.claim.receipts.append(r)
+    await commit(h)
+    return {"receipt": r.model_dump(), "claim": claim_summary(h)}
+
+
 @router.get("/items")
 async def items(household_id: str):
     """Every scanned item (from the 'before' videos), marked missing/damaged when it's on the loss list."""
