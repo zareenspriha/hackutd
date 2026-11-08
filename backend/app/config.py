@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.6-flash"
     gemini_fallback_models: str = "gemini-3.5-flash,gemini-3.5-flash-lite"
+    gemini_wording_model: str = "gemini-3.5-flash-lite"  # fast model for rewording coach answers
 
     nessie_api_key: str = ""
     nessie_base_url: str = "https://v2-prod-api.nessieisreal.com"

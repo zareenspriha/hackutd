@@ -6,8 +6,10 @@ import Cat from "../Cat";
 import { useDemo } from "../demo";
 import { Assumptions, EASE, useNav } from "../ui";
 import { api } from "@/lib/api";
+import { useLive } from "@/lib/live";
+import { usd } from "@/lib/format";
 
-const MAX = 2480;
+const MOCK_MAX = 2480;
 type Step = "amount" | "confirm" | "done";
 
 /**
@@ -16,6 +18,10 @@ type Step = "amount" | "confirm" | "done";
  */
 export default function Fund() {
   const { s, set, toast } = useDemo();
+  const live = useLive();
+  const d = live.data;
+  const MAX = d ? Math.round(d.bridge.amount) : MOCK_MAX; // the backend caps at the exact offer
+  const checking = d ? d.home.checking : 640;
   const { go } = useNav();
   const [step, setStep] = useState<Step>(s.bridgeTaken ? "done" : "amount");
   const [raw, setRaw] = useState(s.bridgeTaken ? String(MAX) : "");
@@ -37,7 +43,9 @@ export default function Fund() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [step]);
+    // re-bind when the live limit arrives so typing is capped at the real amount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, MAX]);
 
   return (
     <div className="flex min-h-full items-center justify-center bg-[radial-gradient(70%_60%_at_50%_0%,#24395a,#0f1a2b_70%)] px-10 pb-24 pt-10 text-cream-2">
@@ -50,8 +58,10 @@ export default function Fund() {
               {step === "amount" && (
                 <>
                   <h1 className="mt-4 text-[52px] font-light leading-[1] tracking-[-0.03em]">How much do <span className="text-ivory/60">you need now?</span></h1>
-                  <p className="mt-5 max-w-md text-lg text-ivory/80">Your proven claim unlocks up to $2,480. It repays itself when the insurance pays. No interest.</p>
-                  <div className="mt-4 max-w-md"><Assumptions dark items={["40% of proven losses ($6,200)", "Capped at 60 days of essentials or $5,000", "Simulated with a sandbox banking API"]} /></div>
+                  <p className="mt-5 max-w-md text-lg text-ivory/80">Your proven claim unlocks up to {usd(MAX)}. It repays itself when the insurance pays. No interest.</p>
+                  <div className="mt-4 max-w-md"><Assumptions dark items={d
+                    ? [`40% of proven losses (${usd(d.bridge.limits.forty_pct_of_losses)})`, `60 days of essentials (${usd(d.bridge.limits.sixty_days_essentials)}), capped at ${usd(d.bridge.limits.cap)}`, "Simulated with a sandbox banking API"]
+                    : ["40% of proven losses ($6,200)", "Capped at 60 days of essentials or $5,000", "Simulated with a sandbox banking API"]} /></div>
                 </>
               )}
               {step === "confirm" && (
@@ -100,7 +110,7 @@ export default function Fund() {
                   ))}
                 </div>
                 <div className="mx-auto mt-5 flex items-center gap-2 rounded-full bg-midnight px-4 py-2.5 text-sm">
-                  <span className="text-ivory">To</span> checking ••4821 <span className="text-ivory/70">$640</span>
+                  <span className="text-ivory">To</span> checking ••4821 <span className="text-ivory/70">{usd(checking)}</span>
                   <ChevronsUpDown className="h-4 w-4 text-ivory/60" />
                 </div>
 
@@ -123,7 +133,8 @@ export default function Fund() {
                   ) : (
                     <Swipe
                       onDone={async () => {
-                        await api.unlockBridgeFunds();
+                        if (d) await live.takeBridge(amount);
+                        else await api.unlockBridgeFunds();
                         set({ bridgeTaken: true });
                         toast("It's in your checking account.");
                         setStep("done");
@@ -136,7 +147,7 @@ export default function Fund() {
               <motion.div key="done" className="flex h-[calc(100%-40px)] flex-col items-center justify-center">
                 <CardReveal amount={amount || MAX} />
                 <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }} className="mt-8 text-center text-ivory/80">
-                  Checking now <span className="tnum text-cream-2">${(640 + (amount || MAX)).toLocaleString()}</span>
+                  Checking now <span className="tnum text-cream-2">${Math.round(d?.home.bridge.disbursed ? checking : checking + (amount || MAX)).toLocaleString()}</span>
                 </motion.p>
               </motion.div>
             )}

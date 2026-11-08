@@ -7,6 +7,7 @@ import { useDemo } from "../demo";
 import { EASE, useNav } from "../ui";
 import { syntheticHouseholds, tierOf } from "@/lib/mock";
 import type { PriorityHousehold } from "@/lib/types";
+import { useLive } from "@/lib/live";
 
 type Tier = NonNullable<PriorityHousehold["tier"]>;
 const tierColor: Record<Tier, string> = { urgent: "#b5574b", high: "#c99a4a", medium: "#bdc4d4", low: "#8a93a3" };
@@ -20,7 +21,18 @@ const tierLabel: Record<Tier, string> = { urgent: "Urgent", high: "High", medium
 export default function Lantern() {
   const { toast } = useDemo();
   const { go } = useNav();
-  const base = useMemo(() => syntheticHouseholds(), []);
+  const live = useLive();
+  const livePri = live.data?.priority;
+  const base = useMemo<PriorityHousehold[]>(
+    () =>
+      livePri
+        ? livePri.map((h) => ({
+            id: h.id, name: h.synthetic ? h.name : "Garcia household", lat: h.lat, lng: h.lng, zip: h.zip, score: h.score,
+            severity: h.severity, fragility: h.fragility, silence: h.silence, reasons: h.reasons, isDemo: !h.synthetic, tier: tierOf(h.score),
+          }))
+        : syntheticHouseholds(),
+    [livePri],
+  );
   const [updated, setUpdated] = useState(false);
   const [tiers, setTiers] = useState<Tier[]>(["urgent", "high", "medium", "low"]);
   const [silentOnly, setSilentOnly] = useState(false);
@@ -30,13 +42,14 @@ export default function Lantern() {
 
   // Before the Garcias' after-scan arrives they sit mid-list; after, they jump to the top.
   const all = useMemo(() => {
+    if (livePri) return [...base].sort((a, b) => b.score - a.score); // live scores already include the after-scan
     const g = updated
       ? { severity: 34, fragility: 28, silence: 28, score: 90, reasons: ["Large contents loss", "No claim started", "Under 1 week of savings"] }
       : { severity: 12, fragility: 28, silence: 18, score: 58, reasons: ["No claim started", "Under 1 week of savings"] };
     return base
       .map((h) => (h.isDemo ? { ...h, ...g, tier: tierOf(g.score) } : h))
       .sort((a, b) => b.score - a.score);
-  }, [base, updated]);
+  }, [base, updated, livePri]);
 
   const list = all.filter((h) => tiers.includes(h.tier!) && (!silentOnly || h.silence > 15) && (!zip || h.zip?.startsWith(zip)));
   const shown = list.slice(0, 40);
@@ -106,7 +119,7 @@ export default function Lantern() {
           <Search className="h-4 w-4 text-ivory/60" strokeWidth={1.75} />
           <input value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} placeholder="ZIP" className="w-16 bg-transparent text-cream-2 outline-none placeholder:text-ivory/50" aria-label="Filter by ZIP" />
         </label>
-        <button onClick={() => (setUpdated(true), setSel("garcia"), toast("New data: Garcia after-scan arrived"))} disabled={updated} className="ml-auto flex h-10 items-center gap-2 rounded-full bg-ivory px-4 text-sm font-medium text-navy disabled:opacity-40">
+        <button onClick={() => (setUpdated(true), setSel("garcia"), livePri && live.refresh(), toast("New data: Garcia after-scan arrived"))} disabled={updated} className="ml-auto flex h-10 items-center gap-2 rounded-full bg-ivory px-4 text-sm font-medium text-navy disabled:opacity-40">
           <Zap className="h-4 w-4" strokeWidth={1.75} /> {updated ? "Garcia data updated" : "Simulate new data"}
         </button>
       </div>

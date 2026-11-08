@@ -1,10 +1,31 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, Sun } from "lucide-react";
+import { ArrowRight, Sun, Upload } from "lucide-react";
 import { Rise, Stage, useNav } from "../ui";
 import { scannedItems } from "@/lib/mock";
 import { usd } from "@/lib/format";
+import { useLive, type LScanResult } from "@/lib/live";
+import { useDemo } from "../demo";
+import type { Item } from "@/lib/types";
+
+// Room used for live uploads, so the Garcias' other pre-scanned rooms stay as they are.
+const LIVE_ROOM = "Office";
+const LIVE_SPOTS: [number, number][] = [[14, 26], [52, 16], [66, 56], [10, 62], [40, 42], [34, 74], [70, 30], [24, 46], [58, 72], [80, 60]];
+
+/** Scan response -> items to tag in the viewfinder (after: what's left, plus what's gone). */
+function liveItems(r: LScanResult): Item[] {
+  const seen = r.items.map((it, i) => ({
+    id: `live${i}`, room: it.room, name: it.name, category: it.category,
+    condition: (it.condition === "good" ? "good" : "damaged") as Item["condition"],
+    replacementCost: it.replacement_cost, acv: it.actual_cash_value,
+  }));
+  const gone = r.losses.filter((l) => l.status === "missing").map((l, i) => ({
+    id: `gone${i}`, room: l.room, name: l.name, category: l.category, condition: "missing" as const,
+    replacementCost: l.replacement_cost, acv: l.actual_cash_value,
+  }));
+  return [...seen, ...gone];
+}
 
 type Phase = "before" | "after";
 type Status = "idle" | "recording" | "done";
@@ -22,6 +43,11 @@ export default function Scan() {
   const [hint, setHint] = useState<string | null>(null);
   const [secs, setSecs] = useState(0);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const live = useLive();
+  const { toast } = useDemo();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [liveList, setLiveList] = useState<Item[] | null>(null);
+  const room = live.data ? LIVE_ROOM : "Living room";
 
   const reset = (p: Phase) => {
     timers.current.forEach(clearTimeout);
@@ -30,7 +56,32 @@ export default function Scan() {
     setShown(0);
     setSecs(0);
     setHint(null);
+    setLiveList(null);
   };
+
+  /** Real scan: upload the video, OpenCV checks it, Gemini lists the items. */
+  async function upload(file: File) {
+    timers.current.forEach(clearTimeout);
+    setLiveList(null);
+    setShown(0);
+    setSecs(0);
+    setStatus("recording");
+    setHint("Reading your video…");
+    try {
+      const r = await live.scan(LIVE_ROOM, phase, file);
+      const list = liveItems(r);
+      setLiveList(list);
+      setHint(r.quality.warnings[0] ?? r.missing_areas[0] ?? null);
+      const t = timers.current;
+      list.forEach((_, i) => t.push(setTimeout(() => setShown(i + 1), 300 + i * 450)));
+      t.push(setTimeout(() => setStatus("done"), 300 + list.length * 450 + 300));
+      t.push(setTimeout(() => setHint(null), 4000));
+    } catch (e) {
+      setStatus("idle");
+      setHint(null);
+      toast(e instanceof Error ? e.message : "Couldn't read that video. Try again.");
+    }
+  }
 
   // TODO (Scan & CV): replace with real upload -> POST /households/{id}/scan?phase=,
   // OpenCV blur/brightness hints, Gemini item list, before/after comparison.
@@ -50,7 +101,7 @@ export default function Scan() {
   }, [status]);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-  const items = scannedItems.slice(0, shown);
+  const items = (liveList ?? scannedItems).slice(0, shown);
   const losses = phase === "after" ? items.filter((i) => i.condition !== "good") : [];
 
   return (
@@ -58,7 +109,7 @@ export default function Scan() {
       left={
         <>
           <Rise>
-            <p className="eyebrow">Living room</p>
+            <p className="eyebrow">{room}</p>
             <h1 className="headline mt-4 text-[72px]">
               {phase === "before" ? (
                 <>Scan a room. <span className="text-dusty">Remember your home.</span></>
@@ -153,7 +204,7 @@ export default function Scan() {
 
           <AnimatePresence>
             {items.map((it) => {
-              const [x, y] = spots[it.id];
+              const [x, y] = spots[it.id] ?? LIVE_SPOTS[Number(it.id.replace(/\D/g, "")) % LIVE_SPOTS.length];
               const lost = phase === "after" && it.condition !== "good";
               return (
                 <motion.div
@@ -179,6 +230,24 @@ export default function Scan() {
               <button onClick={record} aria-label="Start recording" className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-butter/80 transition hover:scale-105">
                 <span className="h-16 w-16 rounded-full bg-butter" />
               </button>
+              {live.data && (
+                <>
+                  <button onClick={() => fileInput.current?.click()} className="flex items-center gap-2 rounded-full bg-butter/15 px-5 py-2.5 text-sm font-medium text-butter transition hover:bg-butter/25">
+                    <Upload className="h-4 w-4" strokeWidth={1.75} /> Upload a video instead
+                  </button>
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) upload(f);
+                    }}
+                  />
+                </>
+              )}
             </div>
           )}
         </motion.div>

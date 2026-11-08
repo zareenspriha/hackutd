@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { ArrowRight, CloudRain, RotateCcw } from "lucide-react";
 import Cat from "../Cat";
@@ -7,8 +7,9 @@ import { useDemo } from "../demo";
 import { Assumptions, EASE, Rise, Stage } from "../ui";
 import { forecast } from "@/lib/mock";
 import { usd } from "@/lib/format";
+import { useLive, type LForecast } from "@/lib/live";
 
-const START = new Date("2026-11-08T12:00:00");
+const START = new Date(new Date().setHours(12, 0, 0, 0));
 const dayLabel = (d: number) => new Date(START.getTime() + d * 86400000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
 export default function Wait() {
@@ -18,24 +19,47 @@ export default function Wait() {
   const [missed, setMissed] = useState(s.paycheckDelayed ? 2 : 0);
   const [pause, setPause] = useState(false);
   const bridge = 2480;
+  const live = useLive();
+  const [fc, setFc] = useState<LForecast | null>(null);
 
-  // TODO (coach engine): GET /households/{id}/forecast?scenario={"claimWeeks":..,"payoutPct":..,"missedWorkWeeks":..}
+  // Live: the backend forecast for this scenario (debounced while a slider moves).
+  useEffect(() => {
+    if (!live.data) return;
+    const t = setTimeout(() => {
+      live.forecast({ claimDelayDays: weeks * 7, payoutPct: pays / 100, missedWorkDays: missed * 7, mortgagePause: pause }).then((f) => f && setFc(f));
+    }, 150);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live.data, weeks, pays, missed, pause]);
+
   const pts = useMemo(() => {
+    if (live.data && fc) return fc.days.map((p) => ({ day: p.day, balance: p.balance }));
     const base = forecast(weeks, pays / 100, missed, bridge).map((p) => ({ ...p, balance: p.balance + (s.sisterSent ? 200 : 0) }));
     return pause ? base.map((p) => ({ ...p, balance: p.balance + (p.day >= 53 ? 2900 : p.day >= 23 ? 1450 : 0) })) : base;
-  }, [weeks, pays, missed, pause, s.sisterSent]);
+  }, [live.data, fc, weeks, pays, missed, pause, s.sisterSent]);
 
   const low = pts.reduce((m, p) => (p.balance < m.balance ? p : m), pts[0]);
   const short = low.balance < 0;
-  const payout = Math.round(8420 * (pays / 100));
+  const payout = live.data && fc ? fc.expected_payout : Math.round(8420 * (pays / 100));
 
-  const events = [
-    { day: 0, label: `Bridge Funds +${usd(bridge)}`, sign: 1 },
-    { day: 5, label: "Car payment −$380", sign: -1 },
-    { day: 14, label: missed >= 2 ? "Paycheck delayed" : "Paycheck +$1,650", sign: missed >= 2 ? 0 : 1 },
-    ...(pause ? [] : [{ day: 23, label: "Mortgage −$1,450", sign: -1 }]),
-    { day: weeks * 7, label: `Insurance payout +${usd(payout)}`, sign: 1 },
-  ].filter((e) => e.day <= pts[pts.length - 1].day);
+  const KEY = ["Paycheck", "Car payment", "Mortgage", "Insurance payout"];
+  const events = (live.data && fc
+    ? fc.days.flatMap((d) =>
+        d.events
+          .filter((e) => KEY.includes(e.label))
+          .map((e) => ({ day: d.day, label: `${e.label} ${e.amount >= 0 ? "+" : "−"}${usd(Math.abs(e.amount))}`, sign: Math.sign(e.amount) })),
+      )
+    : [
+        { day: 0, label: `Bridge Funds +${usd(bridge)}`, sign: 1 },
+        { day: 5, label: "Car payment −$380", sign: -1 },
+        { day: 14, label: missed >= 2 ? "Paycheck delayed" : "Paycheck +$1,650", sign: missed >= 2 ? 0 : 1 },
+        ...(pause ? [] : [{ day: 23, label: "Mortgage −$1,450", sign: -1 }]),
+        { day: weeks * 7, label: `Insurance payout +${usd(payout)}`, sign: 1 },
+      ]
+  ).filter((e) => e.day <= pts[pts.length - 1].day);
+  const assumptions = live.data && fc
+    ? fc.assumptions
+    : ["Essentials $95 a day, hotel $89 a night for 14 nights", "Paycheck $1,650 every two weeks", "Deductible $2,500 comes out of the payout", "Bridge Funds repaid from the payout"];
 
   const W = 760, H = 280;
   const lo = Math.min(-1500, ...pts.map((p) => p.balance));
@@ -87,7 +111,7 @@ export default function Wait() {
               <line x1={x(low.day)} x2={x(low.day)} y1={0} y2={H} stroke="#b5574b" strokeWidth={1.5} />
               <text x={x(low.day) - 8} y={14} textAnchor="end" fontSize={13} fill="#8e3a30">Money gets tight {dayLabel(low.day)}</text>
               {events.map((e) => (
-                <g key={e.label}>
+                <g key={`${e.day}-${e.label}`}>
                   <circle cx={x(e.day)} cy={y(bal(e.day))} r={5} fill="#f2f1ee" stroke="#1c2e4a" strokeWidth={2}>
                     <title>{e.label}</title>
                   </circle>
@@ -122,7 +146,7 @@ export default function Wait() {
           </div>
 
           <div className="px-6 pb-4">
-            <Assumptions items={["Essentials $95 a day, hotel $89 a night for 14 nights", "Paycheck $1,650 every two weeks", "Deductible $2,500 comes out of the payout", "Bridge Funds repaid from the payout"]} />
+            <Assumptions items={assumptions} />
           </div>
         </motion.div>
       }

@@ -5,6 +5,7 @@ import { ArrowRight, ArrowUp } from "lucide-react";
 import Cat from "../Cat";
 import { Assumptions, Rise, Stage, useNav } from "../ui";
 import { api } from "@/lib/api";
+import { useLive } from "@/lib/live";
 
 type Rich =
   | { kind: "ladder"; rows: { label: string; amount: string; use: boolean }[] }
@@ -50,6 +51,7 @@ const scripted: Record<string, Omit<Msg, "role">> = {
 };
 
 export default function Ask() {
+  const live = useLive();
   const [msgs, setMsgs] = useState<Msg[]>([
     { role: "looma", text: "I can see your accounts, your claim, and what's coming in. Ask me anything. No question is too small." },
   ]);
@@ -67,7 +69,15 @@ export default function Ask() {
     setInput("");
     setTyping(true);
     const known = scripted[q];
-    const reply: Omit<Msg, "role"> = known ?? (await api.coach("garcia", q).then((r) => ({ text: r.answer, next: r.nextStep })));
+    // Live: the real coach answers everything (numbers from the engines, wording from Gemini).
+    const fromCoach = live.data ? await live.coach(q) : null;
+    const reply: Omit<Msg, "role"> = fromCoach
+      ? {
+          text: fromCoach.answer.replace(/\s*Next step: .*$/, ""), // shown separately below the answer
+          next: fromCoach.next_step?.title,
+          assumptions: fromCoach.assumptions.slice(0, 3),
+        }
+      : known ?? (await api.coach("garcia", q).then((r) => ({ text: r.answer, next: r.nextStep })));
     setTimeout(() => {
       setTyping(false);
       setMsgs((m) => [...m, { role: "looma", ...reply }]);

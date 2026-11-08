@@ -98,6 +98,8 @@ class Gemini:
         self.model = s.gemini_model
         # tried in order when a model is overloaded (503) or out of quota (429)
         self.models = [self.model] + [m.strip() for m in s.gemini_fallback_models.split(",") if m.strip() and m.strip() != self.model]
+        # rewording is short and latency-sensitive: try the fast model first
+        self.wording_models = [s.gemini_wording_model] + [m for m in self.models if m != s.gemini_wording_model]
         self.client = None
         if not self.mock:
             from google import genai
@@ -107,10 +109,10 @@ class Gemini:
             self.client = genai.Client(api_key=s.gemini_api_key, http_options=types.HttpOptions(
                 timeout=60000, retry_options=types.HttpRetryOptions(attempts=1)))
 
-    def _call(self, contents, config=None):
+    def _call(self, contents, config=None, models: list[str] | None = None):
         """generate_content with automatic fallback to the next model when one is busy."""
         last: Exception | None = None
-        for m in self.models:
+        for m in models or self.models:
             try:
                 return self.client.models.generate_content(model=m, contents=contents, config=config)
             except Exception as e:  # noqa: BLE001
@@ -198,14 +200,14 @@ class Gemini:
             "Use ONLY the numbers in the facts. Never invent amounts, dates or advice.\n\n"
             f"Task: {instruction}\nFacts (JSON): {json.dumps(facts, default=str)}"
         )
-        return (self._call(prompt).text or "").strip()
+        return (self._call(prompt, models=self.wording_models).text or "").strip()
 
     async def write(self, instruction: str, facts: dict, fallback: str) -> str:
         """Plain-language wording. Falls back to the template text on any failure."""
         if self.mock:
             return fallback
         try:
-            text = await asyncio.wait_for(asyncio.to_thread(self._write_sync, instruction, facts), timeout=12)
+            text = await asyncio.wait_for(asyncio.to_thread(self._write_sync, instruction, facts), timeout=8)
             return text or fallback
         except Exception as e:  # noqa: BLE001
             log.warning("Gemini wording failed: %s", e)

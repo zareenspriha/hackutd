@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { AnimatePresence, motion } from "motion/react";
 import { CloudRain, HandHeart, RotateCcw, ScanLine, Timer, X } from "lucide-react";
 import type { NextStep } from "@/lib/types";
+import { sceneOf, useLive } from "@/lib/live";
 
 /**
  * Shared demo state: what has happened to the Garcias so far. Every scene reads it, so the story
@@ -49,17 +50,53 @@ export function computeSteps(s: DemoState): NextStep[] {
 }
 
 export function DemoProvider({ children }: { children: React.ReactNode }) {
-  const [s, setS] = useState<DemoState>(initial);
+  const live = useLive();
+  const [local, setS] = useState<DemoState>(initial);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [panel, setPanel] = useState(false);
 
-  const set = useCallback((p: Partial<DemoState>) => setS((o) => ({ ...o, ...p })), []);
+  // With the backend running, what has happened comes from it; local flags still cover UI-only steps.
+  const d = live.data;
+  const s: DemoState = useMemo(
+    () =>
+      d
+        ? {
+            ...local,
+            disasterMode: d.home.disaster_mode,
+            claimFiled: d.home.claim_filed,
+            bridgeTaken: d.home.bridge.disbursed,
+            receiptAdded: local.receiptAdded || d.claim.receipts.length > 0,
+            sisterSent: d.home.help_circle.length > 0,
+            mortgageCalled: d.home.mortgage_pause_requested,
+          }
+        : local,
+    [d, local],
+  );
+
+  // Each story step also happens in the backend (Nessie, MongoDB) when it's connected.
+  const set = useCallback(
+    (p: Partial<DemoState>) => {
+      setS((o) => ({ ...o, ...p }));
+      if (p.claimFiled) live.fileClaim();
+      if (p.receiptAdded) live.addReceipt({ merchant: "Taquería El Sol", category: "food", total: 210, days_covered: 7 });
+      if (p.sisterSent) live.helpCircle("Ana Garcia", 200);
+      if (p.mortgageCalled) live.mortgagePause();
+      if (p.scanAdded && live.data) {
+        const rooms = new Set(live.data.claim.losses.filter((l) => !l.confirmed).map((l) => l.room));
+        rooms.forEach((r) => live.confirmRoom(r));
+      }
+    },
+    [live],
+  );
   const toast = useCallback((text: string) => {
     const id = Date.now() + Math.random();
     setToasts((t) => [...t, { id, text }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3600);
   }, []);
-  const steps = useMemo(() => computeSteps(s), [s]);
+  const steps = useMemo<NextStep[]>(
+    () => (d ? d.home.next_steps.map((x) => ({ ...x, action: sceneOf(x.action) })) : computeSteps(s)),
+    [d, s],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -76,7 +113,7 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
     { icon: CloudRain, label: "Trigger flood", run: () => (set({ disasterMode: true }), toast("Disaster Mode is on. Late fees are paused.")) },
     { icon: HandHeart, label: "Sister sends $200", run: () => (set({ sisterSent: true }), toast("Your sister sent $200")) },
     { icon: Timer, label: "Delay paycheck", run: () => (set({ paycheckDelayed: true }), toast("Paycheck delayed two weeks")) },
-    { icon: RotateCcw, label: "Reset demo", run: () => (setS(initial), toast("Demo reset")) },
+    { icon: RotateCcw, label: "Reset demo", run: () => (setS(initial), live.reset(), toast("Demo reset")) },
   ];
 
   return (

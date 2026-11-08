@@ -7,6 +7,7 @@ import { useDemo } from "../demo";
 import { EASE, Rise, Stage, useNav } from "../ui";
 import { compareItems, type CItem } from "@/lib/demoData";
 import { usd } from "@/lib/format";
+import { useLive } from "@/lib/live";
 
 type Mode = "side" | "slider" | "changes";
 const STEPS = ["Finding your items", "Matching with your last scan", "Checking for damage", "Estimating values"];
@@ -37,8 +38,11 @@ export default function Compare() {
 
   const items = compareItems.map((i) => (i.id === "lamp" && review === "yes" ? { ...i, status: "damaged" as const, damageType: "Water at the base", severity: 1 as const } : i.id === "lamp" && review === "no" ? { ...i, status: "unchanged" as const } : i));
   const count = (st: CItem["status"]) => items.filter((i) => i.status === st).length;
-  const toClaim = items.filter((i) => i.status === "damaged" || i.status === "missing");
-  const claimTotal = toClaim.reduce((a, i) => a + i.rc, 0);
+  // Live: the button adds the real losses from your scans that you haven't confirmed yet.
+  const { data: d } = useLive();
+  const pending = d?.claim.losses.filter((l) => !l.confirmed) ?? [];
+  const toClaim = d && pending.length ? pending : items.filter((i) => i.status === "damaged" || i.status === "missing");
+  const claimTotal = d && pending.length ? pending.reduce((a, l) => a + l.replacement_cost, 0) : items.filter((i) => i.status === "damaged" || i.status === "missing").reduce((a, i) => a + i.rc, 0);
 
   return (
     <Stage

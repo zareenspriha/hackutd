@@ -176,7 +176,10 @@ Full list in [backend/README.md](backend/README.md) and at `/docs`.
 | `unlockBridgeFunds()` | `POST /households/{id}/bridge/disburse` |
 | `coach(id, message)` | `POST /households/{id}/coach` `{ question }` |
 
-Right now **ask looma** and **bridge funds** call the API; the other screens still read `src/lib/mock.ts` directly.
+### Live data in the app
+`src/lib/live.tsx` loads the household once from the backend and refreshes it after every action, so every screen shows the same live numbers: today, scan (real video upload → OpenCV + Gemini), claim, bridge funds, bills, help circle and ATMs, ask looma, my money, what if, and the lantern. Story steps (filing the claim, a receipt, Ana's $200, paying a bill, the mortgage call) post to the backend, which mirrors money moves to Nessie. **Shift+D → Reset demo** also resets the backend.
+
+If the backend isn't reachable, every screen falls back to the scripted mock story in `src/lib/mock.ts` and `src/lib/demoData.ts`. The before/after illustration on **what changed** stays scripted.
 
 ---
 

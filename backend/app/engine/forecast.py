@@ -18,8 +18,9 @@ def expected_payout(h: Household, s: Scenario) -> float:
     return round(max(0.0, gross - h.deductible), 2)
 
 
-def bill_occurrences(h: Household, horizon: int) -> list[tuple[int, str, float, str]]:
+def bill_occurrences(h: Household, horizon: int, mortgage_pause: bool = False) -> list[tuple[int, str, float, str]]:
     """(day, payee, amount, kind) for each pending bill, recurring monthly."""
+    mortgage_pause = mortgage_pause or h.mortgage_pause_requested
     out = []
     for b in h.bills:
         if b.status == "paid":
@@ -28,7 +29,7 @@ def bill_occurrences(h: Household, horizon: int) -> list[tuple[int, str, float, 
             first = b.due_in_days + 30
         else:
             first = b.due_in_days
-        if b.kind == "mortgage" and h.mortgage_pause_requested:
+        if b.kind == "mortgage" and mortgage_pause:
             first += 30  # one-month disaster pause
         d = first
         while d <= horizon:
@@ -46,7 +47,7 @@ def run_forecast(h: Household, s: Scenario | None = None, extra_expense: float =
     payout = 0.0 if h.claim.paid else expected_payout(h, s)
     repay = h.bridge.amount if h.bridge.disbursed and not h.bridge.repaid else 0.0
 
-    bills = bill_occurrences(h, horizon)
+    bills = bill_occurrences(h, horizon, s.mortgage_pause)
     balance = h.accounts.checking + h.accounts.savings
     days = []
     runway = None

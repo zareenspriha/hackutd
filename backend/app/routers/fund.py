@@ -33,16 +33,21 @@ async def get_bridge(household_id: str):
     return bridge_offer(await load(household_id))
 
 
+class DisburseIn(BaseModel):
+    amount: float | None = Field(None, gt=0, description="How much to take now (defaults to the full offer)")
+
+
 @router.post("/bridge/disburse")
-async def disburse_bridge(household_id: str):
+async def disburse_bridge(household_id: str, body: DisburseIn | None = None):
     h = await load(household_id)
     offer = bridge_offer(h)
     if not offer["eligible"]:
         raise HTTPException(400, offer["reason"])
+    amount = round(min(body.amount, offer["amount"]), 2) if body and body.amount else offer["amount"]
     nessie = get_nessie()
-    txn = await _mirror(nessie.deposit, h.nessie_checking_id or "mock", offer["amount"], "Looma Bridge Funds advance")
-    h.accounts.checking += offer["amount"]
-    h.bridge.amount = offer["amount"]
+    txn = await _mirror(nessie.deposit, h.nessie_checking_id or "mock", amount, "Looma Bridge Funds advance")
+    h.accounts.checking += amount
+    h.bridge.amount = amount
     h.bridge.disbursed = True
     await commit(h)
     return {**bridge_offer(h), "checking": h.accounts.checking, "nessie_transaction_id": txn}

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 
+from ..engine.bridge import available_bridge
 from ..engine.claim import claim_summary
 from ..engine.forecast import run_forecast
 from ..engine.health import indicators
@@ -119,7 +120,7 @@ async def ask(h: Household, question: str, s: Scenario | None = None) -> dict:
                         "without touching your CD or IRA. Start with the steps below.")
     elif intent == "have":
         incoming = {"insurance_payout": fc["expected_payout"], "payout_day": fc["payout_day"],
-                    "bridge_available": money_ladder(h, s, fc)[0]["available"],
+                    "bridge_available": available_bridge(h),  # not yet taken (taken money is already in checking)
                     "help_circle_received": sum(t.amount for t in h.help_circle)}
         facts = {"accounts": _accounts_view(h), "incoming": incoming}
         text = (f"You have ${h.accounts.checking + h.accounts.savings:,.0f} in checking and savings, a "
