@@ -6,7 +6,7 @@ from .data.synthetic import garcia, garcia_purchases, neighbor, synthetic_atms, 
 from .services.nessie import get_nessie
 from .store import get_store
 
-log = logging.getLogger("aftershock.seed")
+log = logging.getLogger("looma.seed")
 
 
 async def seed(force: bool = False) -> dict:

@@ -1,4 +1,4 @@
-"""Aftershock API. Run: uvicorn app.main:app --reload (from backend/)."""
+"""Looma API. Run: uvicorn app.main:app --reload (from backend/)."""
 import logging
 from contextlib import asynccontextmanager
 
@@ -21,7 +21,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Aftershock API", version="0.1.0", lifespan=lifespan,
+app = FastAPI(title="Looma API", version="0.1.0", lifespan=lifespan,
               description="Prove it (State Farm), fund it (Capital One), navigate it (PNC).")
 
 _origins = [o.strip() for o in get_settings().cors_origins.split(",")]
@@ -37,7 +37,7 @@ app.include_router(insurer.router)
 async def root():
     s = get_settings()
     return {
-        "name": "Aftershock API",
+        "name": "Looma API",
         "docs": "/docs",
         "modes": {
             "gemini": "mock" if s.use_mock_gemini else s.gemini_model,

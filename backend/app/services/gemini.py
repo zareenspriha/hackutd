@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from ..config import get_settings
 from . import cv_checks
 
-log = logging.getLogger("aftershock.gemini")
+log = logging.getLogger("looma.gemini")
 
 
 # ---------- response schemas ----------
@@ -193,7 +193,7 @@ class Gemini:
     # ---- wording ----
     def _write_sync(self, instruction: str, facts: dict) -> str:
         prompt = (
-            "You are Aftershock's Recovery Coach, helping a family after a disaster. "
+            "You are Looma's Recovery Coach, helping a family after a disaster. "
             "Rewrite the answer below in warm, plain language: at most 3 short sentences. "
             "Use ONLY the numbers in the facts. Never invent amounts, dates or advice.\n\n"
             f"Task: {instruction}\nFacts (JSON): {json.dumps(facts, default=str)}"

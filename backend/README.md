@@ -1,4 +1,4 @@
-# Aftershock backend (FastAPI)
+# Looma backend (FastAPI)
 
 Runs fully offline: with no keys, Gemini, Nessie and MongoDB are replaced by local mocks (demo table items, in-memory DB).
 

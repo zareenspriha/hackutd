@@ -15,7 +15,7 @@ from ..services.nessie import get_nessie
 from ..store import get_store
 from .deps import commit, load
 
-log = logging.getLogger("aftershock.fund")
+log = logging.getLogger("looma.fund")
 router = APIRouter(prefix="/households/{household_id}", tags=["fund (Capital One)"])
 
 
@@ -40,7 +40,7 @@ async def disburse_bridge(household_id: str):
     if not offer["eligible"]:
         raise HTTPException(400, offer["reason"])
     nessie = get_nessie()
-    txn = await _mirror(nessie.deposit, h.nessie_checking_id or "mock", offer["amount"], "Aftershock Bridge Funds advance")
+    txn = await _mirror(nessie.deposit, h.nessie_checking_id or "mock", offer["amount"], "Looma Bridge Funds advance")
     h.accounts.checking += offer["amount"]
     h.bridge.amount = offer["amount"]
     h.bridge.disbursed = True

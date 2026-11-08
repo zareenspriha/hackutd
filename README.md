@@ -1,8 +1,8 @@
-# Aftershock
+# Looma
 
 **Prove it. Fund it. Navigate it. No one overlooked.**
 
-After a disaster, families lose more than their home. They lose what they can't prove, what they never claim, and what they waste while waiting. Aftershock proves what a family lost, gets them every dollar they're owed, puts money in their hands before the claim pays, and guides every money decision until it does.
+After a disaster, families lose more than their home. They lose what they can't prove, what they never claim, and what they waste while waiting. Looma proves what a family lost, gets them every dollar they're owed, puts money in their hands before the claim pays, and guides every money decision until it does.
 
 Built at **HackUTD 2026**.
 

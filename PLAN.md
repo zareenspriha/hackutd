@@ -1,6 +1,6 @@
-# Aftershock: Final Plan
+# Looma: Final Plan
 
-**What it is:** Aftershock helps families recover financially after a disaster. It proves what they lost, gets them every dollar they're owed, puts money in their hands before the claim pays, and guides every money decision until it does.
+**What it is:** Looma helps families recover financially after a disaster. It proves what they lost, gets them every dollar they're owed, puts money in their hands before the claim pays, and guides every money decision until it does.
 
 **Tracks:**
 - Sponsors: State Farm, PNC, Capital One
@@ -270,10 +270,10 @@ After Bridge Funds land, #2 drops and "Call your lender about a mortgage pause" 
 - Devpost: select State Farm, PNC, Capital One, Design, Virality, and all five MLH tracks
 - Public GitHub repo with a README and architecture diagram
 - Demo video under 2 minutes
-- Register an "aftershock" domain with GoDaddy code MLHUTD84 (first available name)
+- Register a "looma" domain with GoDaddy code MLHUTD84 (first available name)
 - Backend live on Vultr
 - Post the demo video on social for Virality
 - Publish the DEV post after submission
 
 ## The close
-"After a disaster, families lose more than their home. They lose what they can't prove, what they never claim, and what they waste while waiting. Aftershock proves it, funds it, and navigates it, so no one is overlooked."
+"After a disaster, families lose more than their home. They lose what they can't prove, what they never claim, and what they waste while waiting. Looma proves it, funds it, and navigates it, so no one is overlooked."

@@ -17,7 +17,7 @@ import httpx
 from ..config import get_settings
 from ..models import Household
 
-log = logging.getLogger("aftershock.nessie")
+log = logging.getLogger("looma.nessie")
 
 
 class NessieError(RuntimeError):

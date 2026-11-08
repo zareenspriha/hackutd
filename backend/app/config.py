@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     nessie_base_url: str = "https://v2-prod-api.nessieisreal.com"
 
     mongodb_uri: str = ""
-    mongodb_db: str = "aftershock"
+    mongodb_db: str = "looma"
 
     cors_origins: str = "*"
     upload_dir: str = "uploads"
