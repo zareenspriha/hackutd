@@ -106,7 +106,7 @@ export default function Fund() {
                   <h1 className="mt-4 text-[52px] font-light leading-[1] tracking-[-0.03em]">It&apos;s in your <span className="text-ivory/60">checking account.</span></h1>
                   <p className="mt-5 max-w-md text-lg text-ivory/80">Nothing to remember. When the insurance payout arrives, looma repays this first.</p>
                   <div className="mt-8 flex gap-3">
-                    <button onClick={() => go("bills")} className="pill bg-cream-2 text-navy hover:bg-white">Plan my bills <ArrowRight className="h-4 w-4" /></button>
+                    <button onClick={() => go("card")} className="pill bg-cream-2 text-navy hover:bg-white">Get my Recovery Card <ArrowRight className="h-4 w-4" /></button>
                     {d?.bridge.eligible ? (
                       <button onClick={() => (setRaw(""), setTaken(null), setStep("amount"))} className="pill border border-ivory/25 text-cream-2 hover:bg-ivory/10">Take more ({usd(d.bridge.remaining)} left)</button>
                     ) : (

@@ -26,6 +26,7 @@ Built at **HackUTD 2026**.
 
 ### fund it (Capital One, on Nessie)
 - **Bridge Funds:** a filed claim with verified proof unlocks cash in minutes. The limit is the lowest of 40% of verified losses (confirmed items seen in a before scan, with normal values), 60 days of essential spending, half of the expected payout after the deductible, and $5,000. It is drawn in parts, every draw carries a bank reference, and it is repaid automatically when the insurance payout lands.
+- **Recovery Card:** Bridge Funds on a virtual card that only works at essentials (hotels, groceries, restaurants, pharmacies, gas). Each tap is a Nessie purchase, anything non-essential is declined, and every hotel night or meal above normal spending is added to the claim automatically, with no receipt to snap.
 - **Disaster Mode / bills:** labels every bill due before the claim pays as *pay now*, *move* or *call about*, pauses late fees, and sorts spending into essential vs. can-wait.
 - **Help Circle:** family and friends send money through Nessie P2P transfers.
 - **Cash Access:** the nearest working ATM, skipping ones knocked out in the disaster zone.

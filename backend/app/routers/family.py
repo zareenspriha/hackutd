@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from ..models import CheckIn
+from ..models import CheckIn, Outreach
 from ..store import get_store
 from .deps import commit, load, note, now
 
@@ -64,14 +64,11 @@ async def help_status(household_id: str):
     rank, total = await _rank(h)
     if not ci:
         return {"check_in": None, "rank": rank, "of": total, "timeline": [], "self_help": []}
-    seen = next((e for e in h.activity if e.ts >= ci.ts and e.actor.startswith("Responder") and "Opened your file" in e.text), None)
     assign = next((o for o in reversed(h.outreach) if o.kind == "assign"), None)
-    reply = next((o for o in reversed(h.outreach) if o.ts >= ci.ts and o.kind != "assign"), None)
+    reply = next((o for o in reversed(h.outreach) if o.ts >= ci.ts and o.kind not in ("assign", "reply")), None)
     timeline = [
         {"id": "sent", "label": "Sent to responders", "done": True, "ts": ci.ts,
          "detail": f"You're #{rank} of {total:,} households on their list." if rank else ""},
-        {"id": "seen", "label": "A responder opened your file", "done": bool(seen), "ts": seen.ts if seen else None,
-         "detail": seen.actor.removeprefix("Responder ") if seen else "Most urgent households are opened first."},
         {"id": "assigned", "label": "Someone is assigned to you", "done": bool(h.assigned_to), "ts": assign.ts if assign else None,
          "detail": h.assigned_to or "You'll see their name here."},
         {"id": "reply", "label": "They reached out", "done": bool(reply), "ts": reply.ts if reply else None,
@@ -106,6 +103,39 @@ async def privacy(household_id: str, body: PrivacyIn):
     note(h, "You", "Shared hardship signals with responders" if body.share_hardship else "Stopped sharing hardship signals")
     await commit(h)
     return {"share_hardship": h.fragility_opt_in}
+
+
+class ReplyIn(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+
+
+@router.get("/messages")
+async def messages(household_id: str):
+    """The conversation with responders, oldest first."""
+    h = await load(household_id)
+    return {"messages": [o.model_dump() for o in h.outreach], "assigned_to": h.assigned_to}
+
+
+@router.post("/messages")
+async def reply(household_id: str, body: ReplyIn):
+    """The family writes back. Answering counts as contact, so 'hasn't answered outreach' goes away."""
+    h = await load(household_id)
+    text = body.text.strip()
+    h.outreach.append(Outreach(ts=now(), by="You", kind="reply", note=text))
+    h.outreach_unanswered = False
+    note(h, "You", f"Replied to responders: {text[:80]}")
+    await commit(h)
+    return {"messages": [o.model_dump() for o in h.outreach]}
+
+
+@router.delete("/messages")
+async def clear_messages(household_id: str):
+    """Demo: start the conversation over (used when a different account signs in to the shared demo household)."""
+    h = await load(household_id)
+    h.outreach = []
+    h.assigned_to = None
+    await commit(h, activity=False)
+    return {"messages": []}
 
 
 @router.get("/activity")

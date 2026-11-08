@@ -62,7 +62,7 @@ async def summary():
 
 
 class ReachIn(BaseModel):
-    kind: Literal["check_in", "bridge_offer"] = "check_in"
+    kind: Literal["check_in", "bridge_offer", "message"] = "check_in"
     note: str = Field("", max_length=280)
 
 
@@ -76,7 +76,9 @@ MESSAGES = {
 async def reach_out(household_id: str, body: ReachIn, by: str = Depends(staff)):
     """A responder messages one family. The family sees it on their home screen."""
     h = await load(household_id)
-    msg = body.note.strip() or MESSAGES[body.kind]
+    msg = body.note.strip() or MESSAGES.get(body.kind, "")
+    if not msg:
+        raise HTTPException(400, "Write a message first.")
     h.outreach.append(Outreach(ts=now(), by=by, kind=body.kind, note=msg))
     h.outreach_unanswered = True
     note(h, f"Responder {by}", f"Sent you a message: {msg}")

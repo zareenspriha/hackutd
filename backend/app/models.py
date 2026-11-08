@@ -122,7 +122,7 @@ class Outreach(BaseModel):
     """A responder reaching the family (or an automated check-in). Shown to the family as a message."""
     ts: str
     by: str
-    kind: Literal["check_in", "assign", "bridge_offer", "sweep"]
+    kind: Literal["check_in", "assign", "bridge_offer", "sweep", "message", "reply"]  # reply = the family writing back
     note: str
 
 
@@ -151,6 +151,25 @@ class CircleMember(BaseModel):
     relation: str = "family"
     invited: bool = False  # the family asked this person for help
     asked_at: str | None = None
+
+
+class CardPurchase(BaseModel):
+    ts: str
+    merchant: str
+    kind: str  # lodging, groceries, restaurant, pharmacy, gas, electronics...
+    amount: float
+    approved: bool
+    reason: str = ""  # why it was declined, or how it counts toward the claim
+    added_to_claim: float = 0.0
+    bank_ref: str | None = None
+
+
+class RecoveryCard(BaseModel):
+    """A virtual card that spends Bridge Funds at essentials only, and turns each purchase into claim proof."""
+    active: bool = False
+    last4: str = "4821"
+    purchases: list[CardPurchase] = []
+    nessie_merchants: dict[str, str] = {}
 
 
 class Household(BaseModel):
@@ -185,6 +204,7 @@ class Household(BaseModel):
     post_disaster_spend: dict[str, float] = {}
     displaced_nightly_cost: float = 0.0  # hotel/rental paid until the claim pays (reimbursed later as extra living costs)
     mortgage_pause_requested: bool = False
+    card: RecoveryCard = Field(default_factory=RecoveryCard)
     # Nessie ids (set when real Nessie is used)
     nessie_customer_id: str | None = None
     nessie_checking_id: str | None = None

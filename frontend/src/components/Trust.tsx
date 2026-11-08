@@ -6,10 +6,10 @@
  * - TrustPanel: what responders can and can't see, the hardship-sharing choice, and an activity log
  *   with a bank reference for every money move.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, Check, Eye, EyeOff, HeartHandshake, Landmark, LocateFixed, MapPin, MessageSquare, Phone, ShieldCheck, X } from "lucide-react";
-import { useLive, type LActivityView, type LHelpStatus } from "@/lib/live";
+import { ArrowRight, ArrowUp, Check, Eye, EyeOff, HeartHandshake, Landmark, LocateFixed, MapPin, MessageSquare, Phone, ShieldCheck, X } from "lucide-react";
+import { useLive, type LActivityView, type LHelpStatus, type LOutreach } from "@/lib/live";
 import { useDemo } from "./demo";
 import { useNav } from "./ui";
 import { usd } from "@/lib/format";
@@ -182,23 +182,90 @@ export function SafetyCheck() {
   );
 }
 
+const clock = (ts: string) => new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
+/** A conversation between a family and responders. `side` decides whose bubbles sit on the right. */
+export function Thread({ messages, side, dark = false, onSend, placeholder }: {
+  messages: LOutreach[]; side: "family" | "staff"; dark?: boolean; onSend?: (text: string) => Promise<boolean>; placeholder?: string;
+}) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (box.current) box.current.scrollTop = box.current.scrollHeight; // newest at the bottom, without moving the page
+  }, [messages.length]);
+  const mine = (m: LOutreach) => (side === "family" ? m.kind === "reply" : m.kind !== "reply");
+  const label = (m: LOutreach) =>
+    m.kind === "reply" ? (side === "family" ? "You" : "Family") : m.kind === "sweep" ? `${m.by} · automatic check-in` : m.by;
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    const t = text.trim();
+    if (!t || !onSend) return;
+    setSending(true);
+    if (await onSend(t)) setText("");
+    setSending(false);
+  }
+  return (
+    <div>
+      <div ref={box} className="no-scrollbar max-h-[260px] space-y-2 overflow-y-auto">
+        {messages.length === 0 && <p className={`text-sm ${dark ? "text-ivory/60" : "text-dusty-deep"}`}>No messages yet.</p>}
+        <AnimatePresence initial={false}>
+          {messages.map((m, i) => (
+            <motion.div key={m.ts + i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`flex ${mine(m) ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] rounded-[16px] px-3.5 py-2 ${mine(m)
+                ? dark ? "rounded-br-[4px] bg-ivory text-navy" : "rounded-br-[4px] bg-midnight text-cream-2"
+                : dark ? "rounded-bl-[4px] bg-navy text-cream-2" : "rounded-bl-[4px] bg-white/70 text-navy"}`}>
+                <p className={`text-[11px] ${mine(m) ? (dark ? "text-navy/60" : "text-ivory/70") : dark ? "text-ivory/60" : "text-dusty-deep"}`}>{label(m)} · {clock(m.ts)}</p>
+                <p className="text-[15px] leading-snug">{m.note}</p>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+      {onSend && (
+        <form onSubmit={send} className={`mt-3 flex items-center gap-2 rounded-full p-1 pl-4 ${dark ? "bg-navy" : "bg-white/60"}`}>
+          <input value={text} onChange={(e) => setText(e.target.value.slice(0, 500))} placeholder={placeholder ?? "Write a message…"} aria-label="Message"
+            className={`min-w-0 flex-1 bg-transparent text-[15px] outline-none ${dark ? "text-cream-2 placeholder:text-ivory/50" : "text-navy placeholder:text-dusty"}`} />
+          <button disabled={sending || !text.trim()} aria-label="Send" className={`flex h-9 w-9 items-center justify-center rounded-full disabled:opacity-40 ${dark ? "bg-ivory text-navy" : "bg-midnight text-cream-2"}`}>
+            <ArrowUp className="h-4 w-4" />
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+/** Home: the family's conversation with responders, live (checks every 5 seconds). */
 export function Messages() {
   const live = useLive();
-  const msgs = live.data?.home.messages ?? [];
   const adj = live.data?.home.assigned_to;
-  const m = msgs.find((x) => x.kind !== "assign") ?? msgs[0];
-  if (!m && !adj) return null;
+  const [msgs, setMsgs] = useState<LOutreach[]>([]);
+  const has = (live.data?.home.messages?.length ?? 0) > 0;
+  useEffect(() => {
+    if (!live.data) return;
+    let on = true;
+    const tick = () => live.thread().then((m) => on && setMsgs(m));
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => ((on = false), clearInterval(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!live.data]);
+  if (!live.data || (!has && !msgs.length && !adj)) return null;
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ease: EASE }}
-      className="flex gap-3 rounded-[22px] bg-midnight p-5 text-cream-2">
-      <MessageSquare className="mt-0.5 h-5 w-5 shrink-0 text-ivory" strokeWidth={1.75} />
-      <div>
-        <p className="text-xs uppercase tracking-[0.18em] text-ivory">
-          {adj ? `${adj} · Your adjuster` : "Your claims team"}{m ? ` · ${when(m.ts)}` : ""}
-        </p>
-        {m && <p className="mt-1.5 text-[17px] leading-snug">{m.note}</p>}
-        <p className="mt-2 text-xs text-ivory/70">Real responders never ask for fees, gift cards or your PIN.</p>
+      className="rounded-[22px] border border-navy/[0.08] bg-cream p-5">
+      <p className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-dusty-deep">
+        <MessageSquare className="h-4 w-4" strokeWidth={1.75} /> {adj ? `${adj} · Your adjuster` : "Messages from responders"}
+      </p>
+      <div className="mt-3">
+        <Thread side="family" messages={msgs} placeholder="Reply to responders…"
+          onSend={async (t) => {
+            const ok = await live.reply(t);
+            if (ok) setMsgs(await live.thread());
+            return ok;
+          }} />
       </div>
+      <p className="mt-2 text-xs text-dusty-deep">Real responders never ask for fees, gift cards or your PIN.</p>
     </motion.div>
   );
 }

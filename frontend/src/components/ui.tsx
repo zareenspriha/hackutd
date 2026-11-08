@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "motion/react";
 import { AlertTriangle, CheckCircle2, ChevronDown, CircleAlert } from "lucide-react";
 
-export const SCENES = ["title", "today", "scan", "compare", "claim", "fund", "bills", "circle", "ask", "picture", "wait"] as const;
+export const SCENES = ["title", "today", "scan", "compare", "claim", "fund", "card", "bills", "circle", "ask", "picture", "wait"] as const;
 export type SceneId = (typeof SCENES)[number];
 
 type Nav = { scene: SceneId; go: (s: SceneId) => void; next: () => void; back: () => void };
