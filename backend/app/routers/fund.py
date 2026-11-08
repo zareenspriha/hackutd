@@ -10,7 +10,7 @@ from ..data.synthetic import garcia_purchases
 from ..engine.bridge import bridge_offer
 from ..engine.disaster import bill_view, label_spending, set_disaster_mode
 from ..engine.forecast import expected_payout
-from ..models import HelpTransfer, Scenario
+from ..models import CircleMember, HelpTransfer, Scenario
 from ..services.nessie import get_nessie
 from ..store import get_store
 from .deps import commit, load
@@ -142,10 +142,54 @@ async def help_circle(household_id: str, body: HelpIn):
     else:
         txn = await nessie.transfer("mock_sender", "mock_checking", body.amount, f"Help Circle from {body.from_name}")
     h.help_circle.append(HelpTransfer(**body.model_dump()))
+    if not any(m.name == body.from_name for m in h.circle):
+        h.circle.append(CircleMember(name=body.from_name, relation="Family"))
     h.accounts.checking += body.amount
     await commit(h)
     return {"received": body.amount, "from": body.from_name, "checking": h.accounts.checking,
             "help_circle_total": sum(t.amount for t in h.help_circle), "nessie_transaction_id": txn}
+
+
+class InviteIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    relation: str = Field("Family", max_length=30)
+
+
+def _circle_view(h) -> dict:
+    sent = {}
+    for t in h.help_circle:
+        sent[t.from_name] = sent.get(t.from_name, 0) + t.amount
+    return {
+        "members": [{**m.model_dump(), "sent": round(sent.get(m.name, 0), 2)} for m in h.circle],
+        "total": round(sum(sent.values()), 2),
+    }
+
+
+@router.get("/circle")
+async def get_circle(household_id: str):
+    """The family's Help circle: who they can ask, and who has sent money."""
+    return _circle_view(await load(household_id))
+
+
+@router.post("/circle")
+async def add_to_circle(household_id: str, body: InviteIn):
+    """Add someone to the Help circle."""
+    h = await load(household_id)
+    if any(m.name.lower() == body.name.strip().lower() for m in h.circle):
+        raise HTTPException(409, f"{body.name} is already in your circle")
+    h.circle.append(CircleMember(name=body.name.strip(), relation=body.relation.strip() or "Family"))
+    await commit(h)
+    return _circle_view(h)
+
+
+@router.post("/circle/request")
+async def request_help(household_id: str):
+    """Share a request link with everyone in the circle (marks them as asked)."""
+    h = await load(household_id)
+    for m in h.circle:
+        m.invited = True
+    await commit(h)
+    return {**_circle_view(h), "link": f"https://looma.app/help/{h.id}"}
 
 
 @router.get("/cash-access")

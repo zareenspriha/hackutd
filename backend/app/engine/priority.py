@@ -31,14 +31,14 @@ def fragility_points(h: Household) -> tuple[float, list[str]]:
     elif days < 30:
         pts += 5
     if days < 30:
-        reasons.append(f"{int(days)} days of savings")
+        reasons.append("No savings left" if days < 1 else f"Savings last {int(days)} day{'s' if int(days) != 1 else ''}")
     if h.accounts.savings < h.deductible:
         pts += 8
-        reasons.append("can't cover deductible")
+        reasons.append("Can't cover the deductible")
     util = h.accounts.credit_card_balance / h.accounts.credit_card_limit if h.accounts.credit_card_limit else 0
     if util >= 0.7:
         pts += 7
-        reasons.append("high card usage")
+        reasons.append("High card usage")
     return min(30.0, pts), reasons
 
 
@@ -46,14 +46,14 @@ def silence_points(h: Household) -> tuple[float, list[str]]:
     pts, reasons = 0.0, []
     if h.days_since_disaster >= 1 and not h.claim.filed:
         pts += 15
-        reasons.append("no claim started")
+        reasons.append("No claim started")
     if h.days_since_last_activity >= 1:
         pts += min(10.0, 2.0 * h.days_since_last_activity)
         if h.days_since_last_activity >= 3:
-            reasons.append(f"quiet for {h.days_since_last_activity} days")
+            reasons.append(f"Quiet for {h.days_since_last_activity} days")
     if h.outreach_unanswered:
         pts += 5
-        reasons.append("hasn't answered outreach")
+        reasons.append("Hasn't answered outreach")
     return min(30.0, pts), reasons
 
 
@@ -72,7 +72,7 @@ def score(h: Household) -> Household:
     # read naturally: loss, claim status, savings, then the rest
     reasons += sil_r[:1] + frag_r[:1] + sil_r[1:] + frag_r[1:]
     h.documented_loss = round(loss, 2)
-    h.priority_score = round(sev + frag + sil, 1)
+    h.priority_score = float(round(sev + frag + sil))
     h.priority_reasons = reasons
     h.priority_parts = {"severity": round(sev, 1), "fragility": round(frag, 1), "silence": round(sil, 1)}
     return h
@@ -85,6 +85,12 @@ def public_view(h: Household, rank: int | None = None) -> dict:
         "score": h.priority_score, "reasons": h.priority_reasons,
         "severity": h.priority_parts.get("severity", 0.0), "fragility": h.priority_parts.get("fragility", 0.0),
         "silence": h.priority_parts.get("silence", 0.0),
-        "summary": ", ".join(h.priority_reasons[:3]) or "No urgent signals",
+        "summary": _summary(h.priority_reasons) or "No urgent signals",
         "claim_filed": h.claim.filed, "synthetic": h.synthetic,
     }
+
+
+def _summary(reasons: list[str]) -> str:
+    """'Large contents loss, no claim started, quiet for 5 days': one sentence, first word capitalized."""
+    top = reasons[:3]
+    return ", ".join([top[0]] + [r[:1].lower() + r[1:] for r in top[1:]]) if top else ""

@@ -28,7 +28,9 @@ function liveItems(r: LScanResult): Item[] {
 }
 
 type Phase = "before" | "after";
-type Status = "idle" | "recording" | "done";
+type Status = "idle" | "camera" | "recording" | "done";
+const MAX_SECONDS = 30;
+const ROOMS = ["Office", "Living room", "Kitchen", "Main bedroom", "Garage"];
 
 // Where each item's tag lands in the viewfinder (percent).
 const spots: Record<string, [number, number]> = {
@@ -47,7 +49,49 @@ export default function Scan() {
   const { toast } = useDemo();
   const fileInput = useRef<HTMLInputElement>(null);
   const [liveList, setLiveList] = useState<Item[] | null>(null);
-  const room = live.data ? LIVE_ROOM : "Living room";
+  const [liveRoom, setLiveRoom] = useState(LIVE_ROOM);
+  const room = live.data ? liveRoom : "Living room";
+  const video = useRef<HTMLVideoElement>(null);
+  const stream = useRef<MediaStream | null>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const stopCamera = () => {
+    stream.current?.getTracks().forEach((t) => t.stop());
+    stream.current = null;
+  };
+  useEffect(() => () => stopCamera(), []);
+
+  /** Real recording from the laptop or phone camera (live mode). Falls back to picking a file. */
+  async function startCamera() {
+    try {
+      const st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      stream.current = st;
+      setStatus("camera");
+      setSecs(0);
+      setTimeout(() => {
+        if (video.current) {
+          video.current.srcObject = st;
+          video.current.play().catch(() => {});
+        }
+      }, 50);
+      const type = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"].find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
+      const rec = new MediaRecorder(st, type ? { mimeType: type } : undefined);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      rec.onstop = () => {
+        stopCamera();
+        const mime = rec.mimeType || "video/webm";
+        const file = new File([new Blob(chunks, { type: mime })], `${liveRoom}-${phase}.${mime.includes("mp4") ? "mp4" : "webm"}`, { type: mime });
+        upload(file);
+      };
+      recorder.current = rec;
+      rec.start(500);
+      timers.current.push(setTimeout(() => rec.state === "recording" && rec.stop(), MAX_SECONDS * 1000));
+    } catch {
+      toast("Camera isn't available here. Pick a video instead.");
+      fileInput.current?.click();
+    }
+  }
+  const stopRecording = () => recorder.current?.state === "recording" && recorder.current.stop();
 
   const reset = (p: Phase) => {
     timers.current.forEach(clearTimeout);
@@ -68,7 +112,7 @@ export default function Scan() {
     setStatus("recording");
     setHint("Reading your video…");
     try {
-      const r = await live.scan(LIVE_ROOM, phase, file);
+      const r = await live.scan(liveRoom, phase, file);
       const list = liveItems(r);
       setLiveList(list);
       setHint(r.quality.warnings[0] ?? r.missing_areas[0] ?? null);
@@ -86,6 +130,7 @@ export default function Scan() {
   // TODO (Scan & CV): replace with real upload -> POST /households/{id}/scan?phase=,
   // OpenCV blur/brightness hints, Gemini item list, before/after comparison.
   function record() {
+    if (live.data) return void startCamera();
     setStatus("recording");
     const t = timers.current;
     scannedItems.forEach((_, i) => t.push(setTimeout(() => setShown(i + 1), 700 + i * 600)));
@@ -95,7 +140,7 @@ export default function Scan() {
   }
 
   useEffect(() => {
-    if (status !== "recording") return;
+    if (status !== "recording" && status !== "camera") return;
     const id = setInterval(() => setSecs((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, [status]);
@@ -122,7 +167,16 @@ export default function Scan() {
             </p>
           </Rise>
 
-          <Rise delay={0.15} className="glass mt-8 inline-grid grid-cols-2 rounded-full p-1.5 text-sm">
+          {live.data && (
+            <Rise delay={0.1} className="mt-6 flex flex-wrap gap-1.5">
+              {ROOMS.map((r) => (
+                <button key={r} onClick={() => (setLiveRoom(r), reset(phase))} className={`h-9 rounded-full px-4 text-sm transition ${r === liveRoom ? "bg-midnight text-cream-2" : "bg-cream-2/70 text-dusty-deep hover:text-navy"}`}>
+                  {r}
+                </button>
+              ))}
+            </Rise>
+          )}
+          <Rise delay={0.15} className="glass mt-4 inline-grid grid-cols-2 rounded-full p-1.5 text-sm">
             {(["before", "after"] as Phase[]).map((p) => (
               <button key={p} onClick={() => reset(p)} className="relative rounded-full px-6 py-2.5 font-medium">
                 {phase === p && <motion.span layoutId="phase" className="absolute inset-0 rounded-full bg-midnight" />}
@@ -149,9 +203,9 @@ export default function Scan() {
                 ) : (
                   <div className="max-w-md rounded-[28px] bg-midnight p-6 text-butter">
                     <p className="text-xs font-medium uppercase tracking-[0.22em] text-ivory">First look</p>
-                    <p className="mt-2 text-[52px] font-light leading-none">{losses.length} things changed</p>
+                    <p className="mt-2 text-[52px] font-light leading-none">{losses.length} {losses.length === 1 ? "thing" : "things"} changed</p>
                     <p className="mt-2 text-ivory">
-                      {losses.map((l) => l.name.toLowerCase()).join(" and ")}.
+                      {losses.map((l) => l.name).join(", ")}.
                     </p>
                     <button onClick={() => go("compare")} className="pill mt-5 bg-butter text-midnight hover:bg-white">
                       See what changed <ArrowRight className="h-4 w-4" />
@@ -174,6 +228,22 @@ export default function Scan() {
           {["left-6 top-6 border-l-2 border-t-2", "right-6 top-6 border-r-2 border-t-2", "left-6 bottom-6 border-l-2 border-b-2", "right-6 bottom-6 border-r-2 border-b-2"].map((c) => (
             <span key={c} className={`absolute h-10 w-10 rounded-sm border-butter/70 ${c}`} />
           ))}
+
+          {status === "camera" && (
+            <>
+              <video ref={video} muted playsInline className="absolute inset-0 h-full w-full object-cover" />
+              <div className="absolute left-8 top-8 flex items-center gap-2 rounded-full bg-navy/60 px-4 py-1.5 text-sm font-medium text-butter">
+                <motion.span className="h-2 w-2 rounded-full bg-clay" animate={{ opacity: [1, 0.2, 1] }} transition={{ duration: 1, repeat: Infinity }} />
+                REC 0:{String(secs).padStart(2, "0")} / 0:{MAX_SECONDS}
+              </div>
+              <div className="absolute inset-x-0 bottom-8 flex flex-col items-center gap-2">
+                <button onClick={stopRecording} aria-label="Stop recording" className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-butter/80 bg-navy/30 backdrop-blur">
+                  <span className="h-8 w-8 rounded-md bg-clay" />
+                </button>
+                <span className="rounded-full bg-navy/60 px-3 py-1 text-xs text-butter">Walk slowly. Tap to finish.</span>
+              </div>
+            </>
+          )}
 
           {status === "recording" && (
             <>

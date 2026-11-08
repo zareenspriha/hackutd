@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .engine.claim import claim_summary
 from .engine.next_steps import compute_next_steps
-from .routers import fund, insurer, navigate, prove
+from .routers import demo, fund, insurer, navigate, prove
 from .routers.deps import load
 from .seed import seed
 
@@ -31,6 +31,7 @@ app.include_router(prove.router)
 app.include_router(fund.router)
 app.include_router(navigate.router)
 app.include_router(insurer.router)
+app.include_router(demo.router)
 
 
 @app.get("/", tags=["meta"])
@@ -59,12 +60,7 @@ async def household_home(household_id: str):
         "claim_filed": h.claim.filed, "expected_days_to_pay": h.claim.expected_days_to_pay,
         "deductible": h.deductible, "weekly_grocery_spend": h.weekly_grocery_spend,
         "help_circle": [t.model_dump() for t in h.help_circle], "mortgage_pause_requested": h.mortgage_pause_requested,
+        "circle": fund._circle_view(h)["members"], "paycheck_delay_days": h.paycheck_delay_days,
         "lat": h.lat, "lng": h.lng,
         "bridge": h.bridge.model_dump(), "next_steps": compute_next_steps(h),
     }
-
-
-@app.post("/demo/reset", tags=["meta"])
-async def demo_reset():
-    """Reset everything to the starting demo state (run before each rehearsal)."""
-    return await seed(force=True)

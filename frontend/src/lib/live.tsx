@@ -17,6 +17,7 @@ export type LHome = {
   deductible: number; weekly_grocery_spend: number; checking: number; savings: number; owed: number;
   bridge: { amount: number; disbursed: boolean; repaid: boolean }; next_steps: LNextStep[];
   help_circle: LHelp[]; mortgage_pause_requested: boolean; lat: number; lng: number;
+  circle?: LCircleMember[]; paycheck_delay_days?: number;
 };
 export type LAccount = { key: string; type: string; amount: number; text: string; limit?: number; monthly_payment?: number; matures_in_weeks?: number };
 export type LBill = {
@@ -53,6 +54,16 @@ export type LScanResult = {
   room: string; phase: "before" | "after"; analysis_method: string; items: LScanItem[]; inventory_total: number;
   missing_areas: string[]; quality: { ok: boolean; warnings: string[] }; losses: LLoss[]; loss_total: number;
 };
+export type LCompareItem = {
+  name: string; category: string; status: "unchanged" | "missing" | "damaged" | "destroyed";
+  replacement_cost: number; actual_cash_value: number; before_ts: number | null; after_ts: number | null;
+  loss_index: number | null; confirmed: boolean;
+};
+export type LCompare = {
+  rooms: string[]; room: string | null; items?: LCompareItem[]; has_video?: boolean; before_ts?: number; after_ts?: number;
+  loss_total?: number; unconfirmed?: number; quality_warnings?: string[];
+};
+export type LDamage = { description: string; area: string; estimated_cost: number };
 export type LHelp = { from_name: string; amount: number; note: string };
 export type LCard =
   | { kind: "ladder"; rows: { label: string; amount: string; use: boolean }[] }
@@ -69,6 +80,8 @@ export type LiveData = {
 export type Scenario = { claimDelayDays?: number; payoutPct?: number; missedWorkDays?: number; mortgagePause?: boolean };
 
 // ---------- http ----------
+
+export type LCircleMember = { name: string; relation: string; invited: boolean; sent: number };
 
 async function req<T>(method: "GET" | "POST", path: string, body?: unknown, form?: FormData): Promise<T> {
   if (!API) throw new Error("No API configured");
@@ -135,7 +148,18 @@ type Live = {
   billAction: (billId: string, action: "pay" | "move") => Promise<void>;
   confirmRoom: (room: string) => Promise<void>;
   scan: (room: string, phase: "before" | "after", video: File) => Promise<LScanResult>;
+  compare: (room?: string) => Promise<LCompare | null>;
+  removeLoss: (index: number) => Promise<void>;
+  damagePhoto: (photo: File) => Promise<{ line: LDamage; quality_warnings: string[] }>;
+  receiptPhoto: (photo: File) => Promise<LReceipt>;
   reset: () => Promise<void>;
+  addToCircle: (name: string, relation: string) => Promise<boolean>;
+  requestHelp: () => Promise<string | null>;
+  demo: {
+    flood: () => Promise<void>;
+    delayPaycheck: (days: number) => Promise<void>;
+    presetScan: (phase: "before" | "after", room?: string) => Promise<boolean>;
+  };
 };
 
 const LiveCtx = createContext<Live>(null as unknown as Live);
@@ -222,7 +246,38 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       await refresh();
       return r;
     },
+    compare: async (room) => {
+      if (!API) return null;
+      try {
+        return await req<LCompare>("GET", hh(`/compare${room ? `?room=${encodeURIComponent(room)}` : ""}`));
+      } catch {
+        return null;
+      }
+    },
+    removeLoss: async (index) => void (await act(() => req("POST", hh("/losses/review"), { edits: [{ index, remove: true }] }))),
+    damagePhoto: async (photo) => {
+      const form = new FormData();
+      form.set("photo", photo);
+      const r = await req<{ line: LDamage; quality_warnings: string[] }>("POST", hh("/damage-photo"), undefined, form);
+      await refresh();
+      return r;
+    },
+    receiptPhoto: async (photo) => {
+      const form = new FormData();
+      form.set("photo", photo);
+      const r = await req<{ receipt: LReceipt }>("POST", hh("/receipt"), undefined, form);
+      await refresh();
+      return r.receipt;
+    },
     reset: async () => void (await act(() => req("POST", "/demo/reset"))),
+    addToCircle: async (name, relation) => (await act(() => req("POST", hh("/circle"), { name, relation }))) !== null,
+    requestHelp: async () => (await act(() => req<{ link: string }>("POST", hh("/circle/request"))))?.link ?? null,
+    demo: {
+      flood: async () => void (await act(() => req("POST", "/demo/flood"))),
+      delayPaycheck: async (days) => void (await act(() => req("POST", `/demo/delay-paycheck?days=${days}`))),
+      presetScan: async (phase, room = "Living room") =>
+        (await act(() => req("POST", `/demo/scan?phase=${phase}&room=${encodeURIComponent(room)}`))) !== null,
+    },
   };
 
   return <LiveCtx.Provider value={value}>{children}</LiveCtx.Provider>;
@@ -246,3 +301,7 @@ export function sceneOf(action: string) {
 }
 
 export const account = (d: LiveData, key: string) => d.accounts.find((a) => a.key === key);
+
+/** URL of a video frame (proof photo) for a scanned room. */
+export const frameUrl = (room: string, phase: "before" | "after", ts: number | null | undefined) =>
+  API ? `${API}/households/${HOUSEHOLD}/frame?room=${encodeURIComponent(room)}&phase=${phase}&ts=${ts ?? 1}` : "";

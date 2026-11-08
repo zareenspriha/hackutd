@@ -112,6 +112,12 @@ class HelpTransfer(BaseModel):
     note: str = ""
 
 
+class CircleMember(BaseModel):
+    name: str
+    relation: str = "family"
+    invited: bool = False  # a request link was shared with them
+
+
 class Household(BaseModel):
     id: str
     name: str
@@ -128,6 +134,8 @@ class Household(BaseModel):
     scans: list[RoomScan] = []
     bridge: BridgeFunds = Field(default_factory=BridgeFunds)
     help_circle: list[HelpTransfer] = []
+    circle: list[CircleMember] = []  # people the family can ask for help
+    paycheck_delay_days: int = 0  # employer closed after the disaster: next paycheck arrives late
     disaster_mode: bool = False
     days_since_disaster: int = 0
     days_since_last_activity: int = 0

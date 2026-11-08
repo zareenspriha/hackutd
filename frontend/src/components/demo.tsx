@@ -8,7 +8,8 @@ import { sceneOf, useLive } from "@/lib/live";
 /**
  * Shared demo state: what has happened to the Garcias so far. Every scene reads it, so the story
  * stays consistent as you move through it. Shift+D opens the presenter panel.
- * TODO (backend): each control maps to POST /demo/{action}.
+ * With the backend running, each control changes the real household (POST /demo/...), so every screen
+ * and the responder map update together.
  */
 export type DemoState = {
   disasterMode: boolean;
@@ -68,6 +69,7 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
             receiptAdded: local.receiptAdded || d.claim.receipts.length > 0,
             sisterSent: d.home.help_circle.length > 0,
             mortgageCalled: d.home.mortgage_pause_requested,
+            paycheckDelayed: (d.home.paycheck_delay_days ?? 0) > 0,
           }
         : local,
     [d, local],
@@ -108,12 +110,41 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const actions = [
-    { icon: ScanLine, label: "Load before scan", run: () => (set({ scanPreset: "before" }), toast("Before scan loaded")) },
-    { icon: ScanLine, label: "Load after scan", run: () => (set({ scanPreset: "after" }), toast("After scan loaded")) },
-    { icon: CloudRain, label: "Trigger flood", run: () => (set({ disasterMode: true }), toast("Disaster Mode is on. Late fees are paused.")) },
+    {
+      icon: ScanLine, label: "Load before scan",
+      run: async () => {
+        if (live.data && !(await live.demo.presetScan("before"))) return toast("Preset scans need the mock analyzer");
+        set({ scanPreset: "before" });
+        toast("Living room before scan loaded");
+      },
+    },
+    {
+      icon: ScanLine, label: "Load after scan",
+      run: async () => {
+        if (live.data && !(await live.demo.presetScan("after"))) return toast("Load the before scan first");
+        set({ scanPreset: "after" });
+        toast("Living room after scan loaded. Check Compare.");
+      },
+    },
+    {
+      icon: CloudRain, label: "Trigger flood",
+      run: async () => {
+        if (live.data) await live.demo.flood();
+        else set({ disasterMode: true });
+        toast("Disaster Mode is on. Late fees are paused.");
+      },
+    },
     { icon: HandHeart, label: "Sister sends $200", run: () => (set({ sisterSent: true }), toast("Your sister sent $200")) },
-    { icon: Timer, label: "Delay paycheck", run: () => (set({ paycheckDelayed: true }), toast("Paycheck delayed two weeks")) },
-    { icon: RotateCcw, label: "Reset demo", run: () => (setS(initial), live.reset(), toast("Demo reset")) },
+    {
+      icon: Timer, label: s.paycheckDelayed ? "Paycheck back on time" : "Delay paycheck",
+      run: async () => {
+        const on = !s.paycheckDelayed;
+        if (live.data) await live.demo.delayPaycheck(on ? 14 : 0);
+        else set({ paycheckDelayed: on });
+        toast(on ? "Paycheck delayed two weeks" : "Paycheck back on time");
+      },
+    },
+    { icon: RotateCcw, label: "Reset demo", run: async () => (setS(initial), await live.reset(), toast("Demo reset")) },
   ];
 
   return (

@@ -6,7 +6,7 @@ import random
 from ..engine.disaster import label_bills
 from ..engine.priority import score
 from ..engine.valuation import value_item
-from ..models import Accounts, Bill, Claim, Household, Item, LossItem, RoomScan
+from ..models import Accounts, Bill, CircleMember, Claim, Household, Item, LossItem, RoomScan
 
 GARCIA_ID = "garcia"
 NEIGHBOR_ID = "nguyen"
@@ -83,6 +83,8 @@ def garcia() -> Household:
         disaster_mode=True, days_since_disaster=5, days_since_last_activity=5, outreach_unanswered=True,
         post_disaster_spend={"food": 260, "lodging": 0},
         displaced_nightly_cost=89,
+        circle=[CircleMember(name="Ana Garcia", relation="Sister"), CircleMember(name="José Ramos", relation="Uncle"),
+                CircleMember(name="Lucía Morales", relation="Friend")],
     )
     return score(label_bills(h))
 
@@ -92,7 +94,7 @@ def neighbor() -> Household:
     g = garcia()
     h = g.model_copy(deep=True, update={
         "id": NEIGHBOR_ID, "name": "The Nguyens", "lat": GARCIA_LOC[0] + 0.0021, "lng": GARCIA_LOC[1] + 0.0017,
-        "monthly_income": 7800, "days_since_last_activity": 0, "outreach_unanswered": False,
+        "monthly_income": 7800, "days_since_last_activity": 0, "outreach_unanswered": False, "circle": [],
         "accounts": Accounts(checking=4200, savings=16500, cd=0, cd_matures_in_days=0, ira=52000,
                              credit_card_balance=400, credit_card_limit=10000, auto_loan_monthly=0, mortgage_monthly=1600),
     })

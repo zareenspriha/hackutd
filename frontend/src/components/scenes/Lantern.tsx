@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import { ArrowLeft, Check, Search, Send, ShieldCheck, UserRoundCheck, Zap } from "lucide-react";
 import Logo from "../Logo";
@@ -16,7 +16,7 @@ const tierLabel: Record<Tier, string> = { urgent: "Urgent", high: "High", medium
 /**
  * the lantern: the responder console. Families no one has heard from glow brightest.
  * Never shows balances: financial signals arrive as plain reasons and can only move a family up.
- * TODO (backend): GET /insurer/households?tier=&silent=&zip= and /insurer/households/{id}
+ * Live: polls GET /insurer/households every few seconds, so a family's score moves the moment they act in the app.
  */
 export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOut?: () => void }) {
   const { toast } = useDemo();
@@ -49,6 +49,25 @@ export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOu
       .map((h) => (h.isDemo ? { ...h, ...g, tier: tierOf(g.score) } : h))
       .sort((a, b) => b.score - a.score);
   }, [base, updated, livePri]);
+
+  // Live: refresh every 4 seconds and say when the Garcias move.
+  useEffect(() => {
+    if (!livePri) return;
+    const t = setInterval(() => live.refresh(), 4000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!livePri]);
+  const rank = all.findIndex((h) => h.id === "garcia") + 1;
+  const prevRank = useRef(rank);
+  const [synced, setSynced] = useState(() => new Date());
+  useEffect(() => {
+    if (!livePri) return;
+    setSynced(new Date());
+    const before = prevRank.current;
+    prevRank.current = rank;
+    if (before && rank && before !== rank) toast(`Garcia household moved ${rank < before ? "up" : "down"} to #${rank}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [livePri]);
 
   const list = all.filter((h) => tiers.includes(h.tier!) && (!silentOnly || h.silence > 15) && (!zip || h.zip?.startsWith(zip)));
   const shown = list.slice(0, 40);
@@ -121,9 +140,16 @@ export default function Lantern({ staff, onSignOut }: { staff?: string; onSignOu
           <Search className="h-4 w-4 text-ivory/60" strokeWidth={1.75} />
           <input value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} placeholder="ZIP" className="w-16 bg-transparent text-cream-2 outline-none placeholder:text-ivory/50" aria-label="Filter by ZIP" />
         </label>
-        <button onClick={() => (setUpdated(true), setSel("garcia"), livePri && live.refresh(), toast("New data: Garcia after-scan arrived"))} disabled={updated} className="ml-auto flex h-10 items-center gap-2 rounded-full bg-ivory px-4 text-sm font-medium text-navy disabled:opacity-40">
-          <Zap className="h-4 w-4" strokeWidth={1.75} /> {updated ? "Garcia data updated" : "Simulate new data"}
-        </button>
+        {livePri ? (
+          <span className="ml-auto flex h-10 items-center gap-2 rounded-full border border-ivory/15 px-4 text-sm text-ivory/80" aria-live="polite">
+            <motion.span className="h-2 w-2 rounded-full bg-sage" animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1.6, repeat: Infinity }} />
+            Live · Updated {synced.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })}
+          </span>
+        ) : (
+          <button onClick={() => (setUpdated(true), setSel("garcia"), toast("New data: Garcia after-scan arrived"))} disabled={updated} className="ml-auto flex h-10 items-center gap-2 rounded-full bg-ivory px-4 text-sm font-medium text-navy disabled:opacity-40">
+            <Zap className="h-4 w-4" strokeWidth={1.75} /> {updated ? "Garcia data updated" : "Simulate new data"}
+          </button>
+        )}
       </div>
 
       <div className="mt-4 grid min-h-0 flex-1 grid-cols-[360px_1fr_400px] gap-4">

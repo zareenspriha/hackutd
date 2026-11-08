@@ -7,7 +7,8 @@ import { useDemo } from "../demo";
 import { EASE, Rise, Stage, useNav } from "../ui";
 import { compareItems, type CItem } from "@/lib/demoData";
 import { usd } from "@/lib/format";
-import { useLive } from "@/lib/live";
+import { frameUrl, useLive, type LCompare, type LCompareItem } from "@/lib/live";
+import { Trash2 } from "lucide-react";
 
 type Mode = "side" | "slider" | "changes";
 const STEPS = ["Finding your items", "Matching with your last scan", "Checking for damage", "Estimating values"];
@@ -21,6 +22,11 @@ const tone: Record<CItem["status"], { label: string; stroke: string; dash?: stri
 };
 
 export default function Compare() {
+  const { data } = useLive();
+  return data ? <LiveCompare /> : <MockCompare />;
+}
+
+function MockCompare() {
   const { go } = useNav();
   const { s, set, toast } = useDemo();
   const [processing, setProcessing] = useState(!s.scanAdded);
@@ -285,6 +291,215 @@ function Crops({ it }: { it: CItem }) {
     <div className="flex shrink-0 gap-1">
       <RoomScene phase="before" crop={it.beforeBox ?? it.box} className="h-14 w-14 rounded-xl" />
       <RoomScene phase="after" crop={it.box} className="h-14 w-14 rounded-xl" />
+    </div>
+  );
+}
+
+/* ---------------- live: the family's real scans ---------------- */
+
+const liveTone: Record<LCompareItem["status"], { label: string; chip: string; Icon: typeof Check }> = {
+  destroyed: { label: "Destroyed", chip: "bg-clay text-cream-2", Icon: Droplets },
+  damaged: { label: "Damaged", chip: "bg-clay text-cream-2", Icon: Droplets },
+  missing: { label: "Missing", chip: "bg-slate text-navy", Icon: CircleDashed },
+  unchanged: { label: "Unchanged", chip: "bg-sage text-cream-2", Icon: CheckCircle2 },
+};
+
+function LiveCompare() {
+  const live = useLive();
+  const { go } = useNav();
+  const { toast } = useDemo();
+  const [c, setC] = useState<LCompare | null>(null);
+  const [room, setRoom] = useState<string | undefined>();
+  const [mode, setMode] = useState<"side" | "slider">("side");
+  const [showAll, setShowAll] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    live.compare(room).then((r) => r && setC(r));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room, live.data]);
+
+  if (!c) return <div className="flex h-full items-center justify-center text-dusty-deep">Loading your rooms…</div>;
+
+  if (!c.room || !c.items)
+    return (
+      <Stage
+        left={
+          <Rise>
+            <p className="eyebrow">Before and after</p>
+            <h1 className="headline mt-4 text-[60px]">Nothing to compare <span className="text-dusty">yet.</span></h1>
+            <p className="mt-4 text-lg text-dusty-deep">Record a room before and after the flood. looma lines them up here.</p>
+            <button onClick={() => go("scan")} className="pill-dark mt-8">Scan a room</button>
+          </Rise>
+        }
+        right={<div />}
+      />
+    );
+
+  const changed = c.items.filter((i) => i.status !== "unchanged");
+  const list = showAll ? c.items : changed;
+  const counts = (["destroyed", "damaged", "missing", "unchanged"] as const)
+    .map((st) => [st, c.items!.filter((i) => i.status === st).length] as const)
+    .filter(([, n]) => n);
+
+  async function addAll() {
+    setBusy(true);
+    await live.confirmRoom(c!.room!);
+    toast(`${changed.length} item${changed.length === 1 ? "" : "s"} added to your claim`);
+    setBusy(false);
+    go("claim");
+  }
+  async function notDamaged(i: LCompareItem) {
+    if (i.loss_index == null) return;
+    await live.removeLoss(i.loss_index);
+    toast(`${i.name} removed from your claim`);
+    setC(await live.compare(c!.room!));
+  }
+
+  return (
+    <Stage
+      left={
+        <>
+          <Rise>
+            <p className="eyebrow">{c.room} · Before and after</p>
+            <h1 className="headline mt-4 text-[60px]">
+              What <span className="text-dusty">changed.</span>
+            </h1>
+          </Rise>
+          {c.rooms.length > 1 && (
+            <Rise delay={0.05} className="mt-5 flex flex-wrap gap-1.5">
+              {c.rooms.map((r) => (
+                <button key={r} onClick={() => setRoom(r)} className={`h-9 rounded-full px-4 text-sm transition ${r === c.room ? "bg-midnight text-cream-2" : "bg-cream-2/70 text-dusty-deep hover:text-navy"}`}>
+                  {r}
+                </button>
+              ))}
+            </Rise>
+          )}
+          <Rise delay={0.08} className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[15px] text-dusty-deep">
+            {counts.map(([st, n]) => (
+              <span key={st}><b className="font-semibold text-navy">{n}</b> {liveTone[st].label.toLowerCase()}</span>
+            ))}
+          </Rise>
+
+          <Rise delay={0.1} className="no-scrollbar mt-4 max-h-[40vh] space-y-2 overflow-y-auto pb-2 pr-1">
+            {list.length === 0 && <p className="text-dusty-deep">Nothing in this room changed. Nothing to add to your claim.</p>}
+            {list.map((it) => {
+              const t = liveTone[it.status];
+              return (
+                <motion.div layout key={it.name} className="flex items-center gap-3 rounded-[20px] border border-navy/[0.08] bg-cream p-3 shadow-[0_1px_2px_rgba(15,26,43,0.06),0_8px_24px_rgba(15,26,43,0.06)]">
+                  {c.has_video ? (
+                    <div className="flex shrink-0 gap-1">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={frameUrl(c.room!, "before", it.before_ts)} alt={`${it.name} before`} className="h-14 w-14 rounded-xl object-cover" />
+                      {it.status !== "unchanged" && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={frameUrl(c.room!, "after", it.after_ts ?? it.before_ts)} alt={`${it.name} after`} className="h-14 w-14 rounded-xl object-cover" />
+                      )}
+                    </div>
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate font-medium text-navy">{it.name}</p>
+                      <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${t.chip}`}>
+                        <t.Icon className="h-3.5 w-3.5" strokeWidth={1.75} /> {t.label}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-sm text-dusty-deep">
+                      <span className="tnum">{it.status === "unchanged" ? "Still there" : `Replacement ${usd(it.replacement_cost)}`}</span>
+                      {it.status !== "unchanged" && it.loss_index != null && (
+                        <button onClick={() => notDamaged(it)} className="inline-flex items-center gap-1 text-xs font-medium text-midnight underline underline-offset-4">
+                          <Trash2 className="h-3 w-3" /> Not a loss
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+            {c.items.length > changed.length && (
+              <button onClick={() => setShowAll(!showAll)} className="mt-1 text-sm font-medium text-midnight underline underline-offset-4">
+                {showAll ? "Show only what changed" : `Show all ${c.items.length} items`}
+              </button>
+            )}
+          </Rise>
+
+          {changed.length > 0 && (
+            <Rise delay={0.2} className="mt-4">
+              <button onClick={addAll} disabled={busy || !c.unconfirmed} className="pill-dark h-[52px] w-full rounded-[14px] disabled:opacity-60">
+                {c.unconfirmed ? `Add ${changed.length} item${changed.length === 1 ? "" : "s"} to my claim · ${usd(c.loss_total ?? 0)}` : "Already in your claim"}
+              </button>
+            </Rise>
+          )}
+        </>
+      }
+      right={
+        c.has_video ? (
+          <div>
+            <div className="glass mb-4 inline-flex rounded-full p-1.5 text-sm" role="tablist">
+              {([["side", "Side by side"], ["slider", "Slider"]] as const).map(([k, l]) => (
+                <button key={k} role="tab" aria-selected={mode === k} onClick={() => setMode(k)} className="relative rounded-full px-5 py-2 font-medium">
+                  {mode === k && <motion.span layoutId="cmp-mode-live" className="absolute inset-0 rounded-full bg-midnight" transition={{ duration: 0.28, ease: EASE }} />}
+                  <span className={`relative ${mode === k ? "text-cream-2" : "text-dusty-deep"}`}>{l}</span>
+                </button>
+              ))}
+            </div>
+            {mode === "side" ? (
+              <div className="grid grid-cols-2 gap-3">
+                {(["before", "after"] as const).map((ph) => (
+                  <div key={ph}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={frameUrl(c.room!, ph, ph === "before" ? c.before_ts : c.after_ts)} alt={`${c.room} ${ph}`} className="aspect-[4/3] w-full rounded-[24px] object-cover shadow-[0_24px_50px_-28px_rgba(15,26,43,0.6)]" />
+                    <p className="mt-2 text-sm text-dusty-deep">{ph === "before" ? "Before" : "After the flood"}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <PhotoSlider before={frameUrl(c.room!, "before", c.before_ts)} after={frameUrl(c.room!, "after", c.after_ts)} />
+            )}
+            {!!c.quality_warnings?.length && <p className="mt-3 text-sm text-dusty-deep">Video note: {c.quality_warnings[0]}</p>}
+          </div>
+        ) : (
+          <div className="rounded-[28px] border border-dashed border-midnight/20 p-10 text-center">
+            <p className="text-lg text-navy">These items came from an earlier scan.</p>
+            <p className="mt-1 text-dusty-deep">Record this room again to see the before and after photos side by side.</p>
+            <button onClick={() => go("scan")} className="pill-light mt-6">Scan a room</button>
+          </div>
+        )
+      }
+    />
+  );
+}
+
+function PhotoSlider({ before, after }: { before: string; after: string }) {
+  const [pos, setPos] = useState(50);
+  const ref = useRef<HTMLDivElement>(null);
+  const drag = (x: number) => {
+    const r = ref.current!.getBoundingClientRect();
+    setPos(Math.max(0, Math.min(100, ((x - r.left) / r.width) * 100)));
+  };
+  return (
+    <div>
+      <div
+        ref={ref}
+        className="relative aspect-[4/3] cursor-ew-resize touch-none select-none overflow-hidden rounded-[24px] shadow-[0_24px_50px_-28px_rgba(15,26,43,0.6)]"
+        onPointerDown={(e) => { (e.target as HTMLElement).setPointerCapture(e.pointerId); drag(e.clientX); }}
+        onPointerMove={(e) => e.buttons && drag(e.clientX)}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={after} alt="After" className="absolute inset-0 h-full w-full object-cover" draggable={false} />
+        <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={before} alt="Before" className="h-full w-full object-cover" draggable={false} />
+        </div>
+        <div className="absolute inset-y-0 w-0.5 bg-cream-2" style={{ left: `${pos}%` }}>
+          <span className="absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-cream-2 text-midnight shadow-lg">
+            <ArrowLeftRight className="h-5 w-5" strokeWidth={1.75} />
+          </span>
+        </div>
+        <span className="absolute left-4 top-4 rounded-full bg-navy/60 px-3 py-1 text-xs text-cream-2">Before</span>
+        <span className="absolute right-4 top-4 rounded-full bg-navy/60 px-3 py-1 text-xs text-cream-2">After</span>
+      </div>
+      <input type="range" min={0} max={100} value={pos} onChange={(e) => setPos(+e.target.value)} className="sr-only" aria-label="Compare before and after" />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
+import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, Camera, Check, CheckCircle2, Image as ImageIcon, Receipt } from "lucide-react";
+import { ArrowRight, Camera, Check, CheckCircle2, Image as ImageIcon, Loader2, Receipt } from "lucide-react";
 import { useDemo } from "../demo";
 import { CountUp, EASE, Rise, Stage, useNav } from "../ui";
 import { garcias } from "@/lib/mock";
@@ -31,14 +32,36 @@ const sectionName: Record<ClaimLine["kind"], { label: string; Icon: typeof Recei
 export default function Claim() {
   const { go } = useNav();
   const { s, set, toast } = useDemo();
-  const { data: d } = useLive();
+  const live = useLive();
+  const d = live.data;
+  const receiptIn = useRef<HTMLInputElement>(null);
+  const damageIn = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<"receipt" | "damage" | null>(null);
+  const [lastDamage, setLastDamage] = useState<string | null>(null);
+
+  async function uploadPhoto(kind: "receipt" | "damage", f: File) {
+    setBusy(kind);
+    try {
+      if (kind === "receipt") {
+        const r = await live.receiptPhoto(f);
+        toast(`${usd(r.countable)} of ${usd(r.total)} added to your claim`);
+      } else {
+        const r = await live.damagePhoto(f);
+        setLastDamage(`${r.line.area}: ${r.line.description} · about ${usd(r.line.estimated_cost)}`);
+        toast(`${usd(r.line.estimated_cost)} of home damage added`);
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't read that photo. Try again.");
+    }
+    setBusy(null);
+  }
 
   const lines = d ? liveLines(d.claim) : garcias.claim.filter((c) => (c.id === "c6" ? s.scanAdded : c.id === "c4" ? s.receiptAdded : true));
   const owed = d ? d.claim.owed.total : lines.reduce((a, c) => a + c.amount, 0);
   const proven = lines.filter((c) => c.documented).reduce((a, c) => a + c.amount, 0);
   const pct = d ? d.claim.documented_pct : Math.round((proven / owed) * 100);
   // the receipt shown in the "only part of it counts" card
-  const food = d?.claim.receipts.find((r) => r.category === "food");
+  const food = d ? d.claim.receipts[d.claim.receipts.length - 1] : undefined;
   const rc = food
     ? { name: food.merchant, paid: food.total, normal: food.total - food.countable, counts: food.countable, text: food.explanation }
     : { name: "Taquería El Sol · Nov 7", paid: 210, normal: 120, counts: 90, text: "Only $90 counts. You normally spend $120 a week on groceries, and insurance covers the difference." };
@@ -56,8 +79,26 @@ export default function Claim() {
           </Rise>
 
           <div className="mt-8 max-w-[480px] space-y-4">
+            {d && (
+              <div className="grid grid-cols-2 gap-3">
+                {([["receipt", "Snap a receipt", "Meals and hotels count too", Camera, receiptIn], ["damage", "Add a damage photo", "Walls, floors, the house itself", ImageIcon, damageIn]] as const).map(([k, t, sub, Icon, ref]) => (
+                  <button key={k} onClick={() => ref.current?.click()} disabled={!!busy} className="flex items-center gap-3 rounded-[20px] border border-navy/[0.08] bg-cream p-4 text-left shadow-[0_1px_2px_rgba(15,26,43,0.06),0_8px_24px_rgba(15,26,43,0.06)] transition hover:bg-cream-2 disabled:opacity-60">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-midnight text-cream-2">
+                      {busy === k ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon className="h-5 w-5" strokeWidth={1.75} />}
+                    </span>
+                    <span>
+                      <span className="block font-medium text-navy">{busy === k ? "Reading photo…" : t}</span>
+                      <span className="block text-sm text-dusty-deep">{sub}</span>
+                    </span>
+                  </button>
+                ))}
+                <input ref={receiptIn} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadPhoto("receipt", f); }} />
+                <input ref={damageIn} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadPhoto("damage", f); }} />
+              </div>
+            )}
+            {d && lastDamage && <p className="rounded-[16px] bg-cream-2 px-4 py-3 text-sm text-navy">{lastDamage}</p>}
             <AnimatePresence mode="wait">
-              {!s.receiptAdded ? (
+              {d && !food ? null : !d && !s.receiptAdded ? (
                 <motion.button
                   key="snap"
                   exit={{ opacity: 0, y: -8 }}
@@ -171,7 +212,11 @@ export default function Claim() {
           </div>
           <div className="mt-2 flex justify-between text-sm">
             <span className="text-dusty-deep">{pct}% documented</span>
-            <button onClick={() => go("scan")} className="font-medium text-midnight underline underline-offset-4">Scan the closet to finish</button>
+            {pct < 100 ? (
+              <button onClick={() => go("compare")} className="font-medium text-midnight underline underline-offset-4">Review what&apos;s left</button>
+            ) : (
+              <span className="flex items-center gap-1 text-[#3f6248]"><Check className="h-3.5 w-3.5" /> Fully documented</span>
+            )}
           </div>
           <div className="absolute inset-x-0 -bottom-3 h-3 bg-[linear-gradient(135deg,#f2f1ee_50%,transparent_50%),linear-gradient(225deg,#f2f1ee_50%,transparent_50%)] bg-[size:18px_12px]" />
         </motion.div>

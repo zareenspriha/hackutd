@@ -194,6 +194,51 @@ async def items(household_id: str):
     return {"items": out}
 
 
+@router.get("/compare")
+async def compare_room(household_id: str, room: str | None = None):
+    """Before vs after for one room, item by item, for the What changed screen.
+    Rooms with both scans are listed; without `room`, the room with unreviewed losses (or the newest) is used."""
+    h = await load(household_id)
+    rooms = [r for r in dict.fromkeys(s.room for s in h.scans if s.phase == "after")
+             if any(s.room == r and s.phase == "before" for s in h.scans)]
+    if not rooms:
+        return {"rooms": [], "room": None}
+    if room not in rooms:
+        pending = [l.room for l in h.claim.losses if not l.confirmed and l.room in rooms]
+        room = pending[-1] if pending else rooms[0]
+    before = next(s for s in h.scans if s.room == room and s.phase == "before")
+    after = next(s for s in h.scans if s.room == room and s.phase == "after")
+    losses = {l.name: (i, l) for i, l in enumerate(h.claim.losses) if l.room == room}
+    items = []
+    for it in before.items:
+        idx_l = losses.get(it.name)
+        if idx_l:
+            i, l = idx_l
+            items.append({"name": it.name, "category": it.category, "status": l.status,
+                          "replacement_cost": l.replacement_cost, "actual_cash_value": l.actual_cash_value,
+                          "before_ts": l.before_frame_ts if l.before_frame_ts is not None else it.frame_ts,
+                          "after_ts": l.after_frame_ts, "loss_index": i, "confirmed": l.confirmed})
+        else:
+            items.append({"name": it.name, "category": it.category, "status": "unchanged",
+                          "replacement_cost": it.replacement_cost, "actual_cash_value": it.actual_cash_value,
+                          "before_ts": it.frame_ts, "after_ts": None, "loss_index": None, "confirmed": True})
+    claimable = [x for x in items if x["status"] != "unchanged"]
+
+    def mid(s):  # a frame from the middle of the video for the full-room view
+        ts = [i.frame_ts for i in s.items if i.frame_ts is not None]
+        return round(sum(ts) / len(ts), 2) if ts else 1.0
+
+    return {
+        "rooms": rooms, "room": room, "items": items,
+        "has_video": bool(before.video_path and after.video_path
+                          and os.path.exists(before.video_path) and os.path.exists(after.video_path)),
+        "before_ts": mid(before), "after_ts": mid(after),
+        "loss_total": round(sum(x["replacement_cost"] for x in claimable), 2),
+        "unconfirmed": sum(1 for x in claimable if not x["confirmed"]),
+        "quality_warnings": after.quality_warnings,
+    }
+
+
 @router.get("/claim")
 async def get_claim(household_id: str):
     return claim_summary(await load(household_id))

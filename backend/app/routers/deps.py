@@ -13,8 +13,15 @@ async def load(household_id: str) -> Household:
     return h
 
 
-async def commit(h: Household) -> Household:
-    """Re-label bills, re-score for the insurer map, and save. Call after every change."""
+async def commit(h: Household, activity: bool = True) -> Household:
+    """Re-label bills, re-score for the insurer map, and save. Call after every change.
+
+    activity=True means the family just did something in the app, so they are no longer "quiet"
+    and responders see their score update live.
+    """
+    if activity:
+        h.days_since_last_activity = 0
+        h.outreach_unanswered = False
     if h.disaster_mode:
         label_bills(h)
     score(h)

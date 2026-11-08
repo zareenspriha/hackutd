@@ -67,7 +67,7 @@ def test_demo_flow(client, tmp_path):
     ids = [h["id"] for h in ranked]
     assert ids.index("garcia") < ids.index("nguyen")
     garcia_row = ranked[ids.index("garcia")]
-    assert "no claim started" in garcia_row["reasons"]
+    assert "No claim started" in garcia_row["reasons"]
     assert "checking" not in str(garcia_row).lower()  # no balances on the map
 
     # Capital One
