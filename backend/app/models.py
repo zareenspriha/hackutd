@@ -136,6 +136,7 @@ class Household(BaseModel):
     synthetic: bool = False
     # spending since the disaster by category, from Nessie purchases (used to nudge for receipts)
     post_disaster_spend: dict[str, float] = {}
+    displaced_nightly_cost: float = 0.0  # hotel/rental paid until the claim pays (reimbursed later as extra living costs)
     mortgage_pause_requested: bool = False
     # Nessie ids (set when real Nessie is used)
     nessie_customer_id: str | None = None

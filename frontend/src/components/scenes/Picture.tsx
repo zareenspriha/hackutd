@@ -48,9 +48,13 @@ function liveView(d: LiveData) {
     kind: kind[r.action],
     note: r.text,
   }));
-  const spendable = (a("checking")?.amount ?? 0) + (a("savings")?.amount ?? 0);
+  // Free money: the lowest balance before the payout (bills, hotel and essentials already paid),
+  // plus Bridge Funds not drawn yet. Below zero means a shortfall, shown plainly instead of "$0".
+  const free = d.forecast.min_balance_before_payout + (d.bridge.eligible ? d.bridge.remaining : 0);
+  const spendable = Math.max(0, free);
   const onTheWay = d.forecast.expected_payout + bridgeLeft;
-  return { have, owe, coming, ind, rungs, spendable, onTheWay };
+  const shortBy = Math.max(0, -free);
+  return { have, owe, coming, ind, rungs, spendable, onTheWay, shortBy };
 }
 
 type Tab = "have" | "health" | "ladder";
@@ -86,11 +90,24 @@ export default function Picture() {
     <div className="mx-auto min-h-full max-w-[960px] px-10 pb-28 pt-12">
       <Rise>
         <p className="eyebrow">My money</p>
-        <h1 className="headline mt-4 text-[60px]">
-          You can spend <span className="tnum">${Math.round(spendable).toLocaleString()}</span>
-          <span className="text-dusty"> today.</span>
-        </h1>
-        <p className="mt-3 text-lg text-dusty-deep">Without touching your CD or IRA. {usd(v.onTheWay)} more is on the way.</p>
+        {spendable < 1 && "shortBy" in v && v.shortBy > 0 ? (
+          <>
+            <h1 className="headline mt-4 text-[60px]">
+              You&apos;re <span className="tnum">{usd(v.shortBy)}</span> <span className="text-dusty">short before the claim pays.</span>
+            </h1>
+            <p className="mt-3 text-lg text-dusty-deep">
+              Your bills and hotel cost more than you have until the payout. <button onClick={() => setTab("ladder")} className="font-medium text-midnight underline underline-offset-4">See how to cover it</button>.
+            </p>
+          </>
+        ) : (
+          <>
+            <h1 className="headline mt-4 text-[60px]">
+              You can spend <span className="tnum">${Math.round(spendable).toLocaleString()}</span>
+              <span className="text-dusty"> today.</span>
+            </h1>
+            <p className="mt-3 text-lg text-dusty-deep">After your bills, hotel and essentials until the claim pays, without touching your CD or IRA. {usd(v.onTheWay)} more is on the way.</p>
+          </>
+        )}
       </Rise>
 
       <Rise delay={0.15} className="mt-8 inline-flex rounded-full border border-midnight/10 bg-cream-2/70 p-1.5" >

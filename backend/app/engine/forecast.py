@@ -60,6 +60,10 @@ def run_forecast(h: Household, s: Scenario | None = None, extra_expense: float =
             events.append({"label": extra_label or "Planned expense", "amount": -extra_expense})
         if day > 0:
             balance -= daily_essential
+            if h.displaced_nightly_cost and day <= pday:
+                balance -= h.displaced_nightly_cost
+                if day % 7 == 0:
+                    events.append({"label": "Hotel this week", "amount": -round(h.displaced_nightly_cost * 7, 2)})
         if day >= FIRST_PAYCHECK_DAY and (day - FIRST_PAYCHECK_DAY) % PAYCHECK_EVERY == 0:
             window_start = day - PAYCHECK_EVERY
             missed = max(0, min(day, s.missed_work_days) - max(window_start, 0))
@@ -98,5 +102,5 @@ def run_forecast(h: Household, s: Scenario | None = None, extra_expense: float =
             f"Paycheck of ${paycheck:,.0f} every 2 weeks" + (f", minus {s.missed_work_days} missed work days" if s.missed_work_days else ""),
             f"Everyday essentials about ${h.weekly_essential_spend:,.0f} a week",
             "Bills repeat monthly on their due dates",
-        ],
+        ] + ([f"Hotel ${h.displaced_nightly_cost:,.0f} a night until the claim pays"] if h.displaced_nightly_cost else []),
     }

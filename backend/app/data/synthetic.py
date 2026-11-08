@@ -82,6 +82,7 @@ def garcia() -> Household:
         bills=_garcia_bills(), scans=scans, claim=Claim(losses=losses, expected_days_to_pay=21),
         disaster_mode=True, days_since_disaster=5, days_since_last_activity=5, outreach_unanswered=True,
         post_disaster_spend={"food": 260, "lodging": 0},
+        displaced_nightly_cost=89,
     )
     return score(label_bills(h))
 

@@ -34,7 +34,7 @@ export type LClaim = {
   expected_days_to_pay: number; losses: LLoss[]; damage: { description: string; area: string; estimated_cost: number }[]; receipts: LReceipt[];
 };
 export type LBridge = {
-  eligible: boolean; amount: number; disbursed: boolean; repaid: boolean; reason: string; documented_losses: number;
+  eligible: boolean; amount: number; limit: number; drawn: number; remaining: number; disbursed: boolean; repaid: boolean; reason: string; documented_losses: number;
   limits: { forty_pct_of_losses: number; sixty_days_essentials: number; cap: number };
 };
 export type LDay = { day: number; balance: number; events: { label: string; amount: number }[] };
@@ -54,6 +54,12 @@ export type LScanResult = {
   missing_areas: string[]; quality: { ok: boolean; warnings: string[] }; losses: LLoss[]; loss_total: number;
 };
 export type LHelp = { from_name: string; amount: number; note: string };
+export type LCard =
+  | { kind: "ladder"; rows: { label: string; amount: string; use: boolean }[] }
+  | { kind: "when"; now: string; later: string; date: string }
+  | { kind: "simulate" }
+  | { kind: "picture" };
+export type LCoach = { intent: string; answer: string; card: LCard | null; next_step: LNextStep | null; assumptions: string[] };
 
 export type LiveData = {
   home: LHome; accounts: LAccount[]; bills: LBill[]; health: LHealth; ladder: LRung[]; claim: LClaim;
@@ -119,7 +125,8 @@ type Live = {
   loading: boolean;
   refresh: () => Promise<void>;
   forecast: (s: Scenario) => Promise<LForecast | null>;
-  coach: (question: string) => Promise<{ answer: string; next_step: LNextStep | null; assumptions: string[] } | null>;
+  coach: (question: string) => Promise<LCoach | null>;
+  whatIf: (s: Scenario) => Promise<{ forecast: LForecast; next_steps: LNextStep[] } | null>;
   fileClaim: () => Promise<void>;
   addReceipt: (r: { merchant: string; category: "food" | "lodging" | "transport" | "other"; total: number; days_covered: number }) => Promise<LReceipt | null>;
   takeBridge: (amount?: number) => Promise<number | null>;
@@ -179,6 +186,14 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       if (!API) return null;
       try {
         return await req<LForecast>("GET", hh(`/forecast${scenarioQuery(s)}`));
+      } catch {
+        return null;
+      }
+    },
+    whatIf: async (s) => {
+      if (!API) return null;
+      try {
+        return await req("GET", hh(`/what-if${scenarioQuery(s)}`));
       } catch {
         return null;
       }

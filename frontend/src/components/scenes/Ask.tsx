@@ -74,6 +74,7 @@ export default function Ask() {
     const reply: Omit<Msg, "role"> = fromCoach
       ? {
           text: fromCoach.answer.replace(/\s*Next step: .*$/, ""), // shown separately below the answer
+          rich: fromCoach.card ?? undefined,
           next: fromCoach.next_step?.title,
           assumptions: fromCoach.assumptions.slice(0, 3),
         }

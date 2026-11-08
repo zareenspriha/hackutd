@@ -40,7 +40,8 @@ def compute_next_steps(h: Household, s: Scenario | None = None, fc: dict | None 
     # 4. bills to pay now / 5. mortgage pause
     pday = fc["payout_day"]
     mortgage_hits = sum(1 for d in fc["days"] for e in d["events"] if e["label"] == "Mortgage" and d["day"] <= pday)
-    short = fc["min_balance_before_payout"] < 0
+    # Short even after the Bridge Funds that are still available? Only then is the pause urgent.
+    short = fc["min_balance_before_payout"] + bridge < 0
     for b in sorted(h.bills, key=lambda b: b.due_in_days):
         if b.status != "pending" or b.due_in_days >= pday:
             continue

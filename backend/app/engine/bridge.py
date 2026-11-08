@@ -13,21 +13,31 @@ def essential_spend_60d(h: Household) -> float:
 
 
 def bridge_offer(h: Household) -> dict:
+    """The limit is fixed by proof; the family can draw it in parts. `amount` = what's left to draw, or what was drawn once it's all used."""
     documented = documented_total(h)
     by_loss = round(documented * LOSS_SHARE, 2)
     by_spend = essential_spend_60d(h)
-    amount = round(min(by_loss, by_spend, CAP), 2)
-    eligible = has_proof(h) and amount > 0 and not h.bridge.disbursed
+    limit = round(min(by_loss, by_spend, CAP), 2)
+    drawn = h.bridge.amount if h.bridge.disbursed else 0.0
+    remaining = round(max(0.0, limit - drawn), 2) if not h.bridge.repaid else 0.0
+    eligible = has_proof(h) and remaining >= 1
     limiter = min((by_loss, "40% of documented losses"), (by_spend, "60 days of essential spending"), (CAP, "the $5,000 cap"))[1]
-    if h.bridge.disbursed:
-        reason = f"${h.bridge.amount:,.0f} already sent" + (" and repaid." if h.bridge.repaid else "; repaid automatically when insurance pays.")
+    if h.bridge.repaid:
+        reason = f"${drawn:,.0f} was repaid from your insurance payout."
     elif not has_proof(h):
         reason = "Add proof first: a reviewed loss list, a damage photo, or a receipt."
+    elif drawn and remaining >= 1:
+        reason = f"${drawn:,.0f} sent so far. ${remaining:,.0f} more is available. All of it is repaid automatically when insurance pays."
+    elif drawn:
+        reason = f"${drawn:,.0f} sent; repaid automatically when insurance pays."
     else:
-        reason = f"${amount:,.0f} available, set by {limiter}. Repaid automatically when insurance pays."
+        reason = f"${limit:,.0f} available, set by {limiter}. Repaid automatically when insurance pays."
     return {
         "eligible": eligible,
-        "amount": amount if not h.bridge.disbursed else h.bridge.amount,
+        "amount": remaining if eligible else drawn,
+        "limit": limit,
+        "drawn": drawn,
+        "remaining": remaining,
         "documented_losses": documented,
         "limits": {"forty_pct_of_losses": by_loss, "sixty_days_essentials": by_spend, "cap": CAP},
         "disbursed": h.bridge.disbursed,
