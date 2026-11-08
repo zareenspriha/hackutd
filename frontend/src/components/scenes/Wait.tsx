@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { ArrowRight, CloudRain, RotateCcw } from "lucide-react";
 import Cat from "../Cat";
 import { useDemo } from "../demo";
-import { Assumptions, EASE, Rise, Stage } from "../ui";
+import { Assumptions, EASE, Rise, Stage, useNav } from "../ui";
 import { forecast } from "@/lib/mock";
 import { usd } from "@/lib/format";
 import { useLive, type LForecast } from "@/lib/live";
@@ -14,6 +14,7 @@ const dayLabel = (d: number) => new Date(START.getTime() + d * 86400000).toLocal
 
 export default function Wait() {
   const { s, set, toast } = useDemo();
+  const { go } = useNav();
   const [weeks, setWeeks] = useState(3);
   const [pays, setPays] = useState(100);
   const [missed, setMissed] = useState(s.paycheckDelayed ? 2 : 0);
@@ -21,12 +22,17 @@ export default function Wait() {
   const bridge = 2480;
   const live = useLive();
   const [fc, setFc] = useState<LForecast | null>(null);
+  const [topStep, setTopStep] = useState<string | null>(null);
 
   // Live: the backend forecast for this scenario (debounced while a slider moves).
   useEffect(() => {
     if (!live.data) return;
     const t = setTimeout(() => {
-      live.forecast({ claimDelayDays: weeks * 7, payoutPct: pays / 100, missedWorkDays: missed * 7, mortgagePause: pause }).then((f) => f && setFc(f));
+      live.whatIf({ claimDelayDays: weeks * 7, payoutPct: pays / 100, missedWorkDays: missed * 7, mortgagePause: pause }).then((r) => {
+        if (!r) return;
+        setFc(r.forecast);
+        setTopStep(r.next_steps[0]?.title ?? null);
+      });
     }, 150);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -40,9 +46,12 @@ export default function Wait() {
 
   const low = pts.reduce((m, p) => (p.balance < m.balance ? p : m), pts[0]);
   const short = low.balance < 0;
+  // Bridge Funds not taken yet: they're the fix, not the mortgage call.
+  const bridgeLeft = live.data && !live.data.bridge.disbursed && live.data.bridge.eligible ? live.data.bridge.amount : 0;
+  const bridgeFixes = short && bridgeLeft >= -low.balance;
   const payout = live.data && fc ? fc.expected_payout : Math.round(8420 * (pays / 100));
 
-  const KEY = ["Paycheck", "Car payment", "Mortgage", "Insurance payout"];
+  const KEY = ["Paycheck", "Car payment", "Mortgage", "Insurance payout", "Bridge Funds repaid automatically"];
   const events = (live.data && fc
     ? fc.days.flatMap((d) =>
         d.events
@@ -133,12 +142,21 @@ export default function Wait() {
 
           <div className={`flex items-center justify-between gap-4 px-8 py-5 ${short ? "bg-navy" : "bg-midnight"} text-cream-2`}>
             <p className="text-lg">
-              {short ? <>You&apos;d run <b className="font-semibold">{usd(-low.balance)} short</b> on {dayLabel(low.day)}.</> : <>You stay above water. Tightest day is {dayLabel(low.day)} with {usd(low.balance)}.</>}
+              {bridgeFixes ? (
+                <>Without help you&apos;d run <b className="font-semibold">{usd(-low.balance)} short</b> on {dayLabel(low.day)}. Your {usd(bridgeLeft)} in Bridge funds covers it.</>
+              ) : short ? <>You&apos;d run <b className="font-semibold">{usd(-low.balance)} short</b> on {dayLabel(low.day)}.</> : <>You stay above water. Tightest day is {dayLabel(low.day)} with {usd(low.balance)}.</>}
               <span className="block text-sm text-ivory">
-                Your next steps would change: {short ? (pause ? "ask your Help Circle to close the gap." : "call your lender about a mortgage pause moves to #1.") : "no change."}
+                {live.data && topStep
+                  ? <>Your next step would be: {topStep.replace(/\.$/, "")}.</>
+                  : <>Your next steps would change: {short ? (pause ? "ask your Help Circle to close the gap." : "call your lender about a mortgage pause moves to #1.") : "no change."}</>}
               </span>
             </p>
-            {short && !pause && (
+            {bridgeFixes && (
+              <button onClick={() => go("fund")} className="pill shrink-0 bg-cream-2 text-midnight hover:bg-white">
+                Unlock Bridge funds <ArrowRight className="h-4 w-4" />
+              </button>
+            )}
+            {short && !bridgeFixes && !pause && (
               <button onClick={() => (set({ mortgageCalled: true }), setPause(true), toast("Mortgage pause requested"))} className="pill shrink-0 bg-cream-2 text-midnight hover:bg-white">
                 Call script <ArrowRight className="h-4 w-4" />
               </button>

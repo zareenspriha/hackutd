@@ -5,6 +5,7 @@ Every answer returns: text, structured facts, assumptions, and one next step (to
 from __future__ import annotations
 
 import re
+from datetime import date, timedelta
 
 from ..engine.bridge import available_bridge
 from ..engine.claim import claim_summary
@@ -15,7 +16,7 @@ from ..engine.next_steps import compute_next_steps
 from ..models import Household, Scenario
 from .gemini import get_gemini
 
-HOTEL_PER_NIGHT = 120.0
+HOTEL_PER_NIGHT = 89.0
 DEFAULT_COSTS = {  # (cost, label, essential) when the question has no dollar amount
     "car": (12000.0, "Replace the car (used, about $12,000)", False),
     "rent": (1500.0, "A month of rent", True),
@@ -55,21 +56,62 @@ def parse_afford(q: str) -> tuple[float, str, bool, list[str]]:
     return 0.0, "", False, ["I couldn't tell the cost. Try 'Can I afford $500 for ...'"]
 
 
+WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+         "nine": 9, "ten": 10, "twelve": 12}
+
+
+def _num(tok: str) -> int | None:
+    return int(tok) if tok.isdigit() else WORDS.get(tok)
+
+
+def parse_scenario(q: str, base: Scenario) -> tuple[Scenario, list[str]]:
+    """Pull a what-if out of plain words: 'six weeks', '2 months', 'pays 70%', 'miss two weeks of work'."""
+    ql = q.lower()
+    upd: dict = {}
+    notes: list[str] = []
+    work = re.search(r"miss(?:ed|ing)?\s+(\w+)\s+(day|week)s?\s+(?:of\s+)?work", ql)
+    if work and _num(work.group(1)):
+        n = _num(work.group(1)) * (7 if work.group(2) == "week" else 1)
+        upd["missed_work_days"] = n
+        notes.append(f"You miss {n} days of work")
+    rest = ql[: work.start()] + ql[work.end():] if work else ql
+    m = re.search(r"(\w+)\s+(day|week|month)s?", rest)
+    if m and _num(m.group(1)) and any(w in rest for w in ("claim", "take", "late", "delay", "pay")):
+        n = _num(m.group(1)) * {"day": 1, "week": 7, "month": 30}[m.group(2)]
+        upd["claim_delay_days"] = n
+        notes.append(f"The claim pays in {n} days")
+    pct = re.search(r"(\d{2,3})\s*%", ql)
+    if pct:
+        upd["payout_pct"] = min(1.0, int(pct.group(1)) / 100)
+        notes.append(f"Insurance pays {pct.group(1)}%")
+    return base.model_copy(update=upd), notes
+
+
 def detect_intent(q: str) -> str:
     ql = q.lower()
-    if "afford" in ql or "can i buy" in ql or "can i pay" in ql:
+    if any(w in ql for w in ("vacation", "trip", "travel", "holiday", "getaway")):
+        return "vacation"
+    if re.search(r"\bsell\b", ql):
+        return "sell"
+    if "what if" in ql or any(w in ql for w in ("takes longer", "runs late", "delay", "only pays", "miss work", "missed work")) \
+            or re.search(r"(take|takes|took)\s+\w+\s+(week|month)", ql):
+        return "what_if"
+    if "afford" in ql or "can i buy" in ql or "can i pay for" in ql or "can i spend" in ql:
         return "afford"
-    if any(w in ql for w in ("what do i have", "my accounts", "how much do i have", "balance", "overview")):
+    if any(w in ql for w in ("what do i have", "my accounts", "how much do i have", "how much money", "balance", "overview")):
         return "have"
-    if any(w in ql for w in ("where do i", "which money", "use first", "ladder", "where should")):
+    if any(w in ql for w in ("where do i", "which money", "use first", "ladder", "where should", "which account")):
         return "where"
-    if any(w in ql for w in ("what should i do", "what do i do", "next", "first step", "help me")):
-        return "next"
+    if any(w in ql for w in ("bill", "mortgage", "rent due", "late fee")):
+        return "bills"
     if any(w in ql for w in ("claim", "owed", "insurance")):
         return "claim"
-    if any(w in ql for w in ("what if", "delay", "late", "only pays", "miss work")):
-        return "what_if"
     return "next"
+
+
+def _date(day: int) -> str:
+    d = date.today() + timedelta(days=day)
+    return d.strftime("%b ") + str(d.day)
 
 
 def _accounts_view(h: Household) -> list[dict]:
@@ -100,6 +142,7 @@ async def ask(h: Household, question: str, s: Scenario | None = None) -> dict:
     next_step = steps[0] if steps else None
     intent = detect_intent(question)
     facts: dict = {}
+    card: dict | None = None
     assumptions = list(fc["assumptions"])
 
     if intent == "afford":
@@ -107,45 +150,108 @@ async def ask(h: Household, question: str, s: Scenario | None = None) -> dict:
         assumptions = extra + assumptions
         if cost <= 0:
             text = "How much does it cost? Try: 'Can I afford $600 for a hotel this week?'"
-            facts = {}
         else:
             r = can_afford(h, cost, label, essential, s)
             facts = r
+            rows = [{"label": p["source"], "amount": f"${p['amount']:,.0f}", "use": True} for p in r["funding_plan"]]
+            rows += [{"label": "CD", "amount": "protected", "use": False}, {"label": "IRA", "amount": "protected", "use": False}]
+            card = {"kind": "ladder", "rows": rows}
             if r["affordable"]:
                 parts = [f"${p['amount']:,.0f} from {p['source'].lower()}" for p in r["funding_plan"]]
                 text = (f"Yes. {label} costs about ${cost:,.0f}. Pay for it with " + ", then ".join(parts)
                         + ". Leave your CD and IRA alone.")
             else:
                 text = (f"Not right now. {label} costs about ${cost:,.0f}, and you'd be ${r['shortfall']:,.0f} short "
-                        "without touching your CD or IRA. Start with the steps below.")
+                        "without touching your CD or IRA.")
+    elif intent == "vacation":
+        cost, _, _, extra = parse_afford(question)
+        if cost <= 0:
+            cost = 600.0
+            extra = ["A short trip costs about $600"]
+        assumptions = extra + assumptions
+        # Bridge Funds are for essentials, so a trip has to fit without them.
+        cushion = h.weekly_essential_spend * 2
+        bridge_in_hand = h.bridge.amount if h.bridge.disbursed and not h.bridge.repaid else 0.0
+        fits_now = fc["min_balance_before_payout"] - bridge_in_hand - cost > cushion
+        after_day = fc["payout_day"] + 7
+        bal_after = next((d["balance"] for d in fc["days"] if d["day"] == min(after_day, fc["horizon"])), 0.0)
+        fits_later = bal_after - cost > cushion
+        later_month = (date.today() + timedelta(days=after_day)).strftime("%B")
+        facts = {"cost": cost, "affordable_now": fits_now, "balance_after_payout": bal_after, "fits_later": fits_later}
+        if fits_now and fits_later:
+            text = (f"Yes, if it's about ${cost:,.0f}. Pay for it after your bills this month, "
+                    "and keep Bridge Funds for the hotel and food.")
+            card = {"kind": "when", "now": "Fits, after this month's bills", "later": "Still fine after the payout", "date": later_month}
+        elif fits_later:
+            text = (f"Not this month, but you don't have to cancel it. Your claim should pay around {_date(fc['payout_day'])}. "
+                    f"After that, a ${cost:,.0f} trip fits without touching your CD.")
+            card = {"kind": "when", "now": "Tight until the claim pays", "later": f"A ${cost:,.0f} trip fits without touching your CD", "date": later_month}
+        else:
+            text = (f"Not yet. Even after the claim pays, a ${cost:,.0f} trip would leave you too little for essentials. "
+                    "Let's look again once your CD matures.")
+            card = {"kind": "when", "now": "Tight until the claim pays", "later": "Check again when your CD matures", "date": later_month}
+    elif intent == "sell":
+        ql = question.lower()
+        thing = "car" if "car" in ql else "house" if ("house" in ql or "home" in ql) else "it"
+        if thing == "car":
+            text = (f"Hold off. Your ${h.accounts.auto_loan_monthly:,.0f} car payment is covered this month, "
+                    "and you'll likely need the car to get to work. Selling it fast usually means a low price.")
+        elif thing == "house":
+            text = "Don't decide that this week. Your claim and Bridge Funds cover the next few weeks, so there's time to think."
+        else:
+            text = "No need to sell anything right now. Your Bridge Funds and the coming payout cover the next few weeks."
+        facts = {"min_balance_before_payout": fc["min_balance_before_payout"], "runway_days": fc["runway_days"]}
+    elif intent == "what_if":
+        s2, notes = parse_scenario(question, s)
+        if s2 == s:  # no numbers in the question: show a late claim
+            s2 = s.model_copy(update={"claim_delay_days": fc["payout_day"] + 21})
+            notes = [f"The claim pays in {s2.claim_delay_days} days"]
+        f2 = run_forecast(h, s2)
+        ind = indicators(h, s2, f2)
+        low, when = f2["min_balance_before_payout"], _date(f2["tight_day"])
+        bridge_left = available_bridge(h)
+        if low < 0 and bridge_left >= -low:
+            text = (f"Without help you'd run about ${-low:,.0f} short around {when}. "
+                    f"Your ${bridge_left:,.0f} in Bridge Funds covers that.")
+        elif low < 0:
+            text = (f"You'd run about ${-low:,.0f} short around {when}. "
+                    "Asking your mortgage lender for a disaster pause would cover most of that.")
+        else:
+            text = f"You'd still make it. Your lowest point is about ${low:,.0f} around {when}."
+        facts = {"scenario": s2.model_dump(), "forecast": {k: f2[k] for k in ("payout_day", "tight_day", "min_balance_before_payout", "runway_days")},
+                 "indicators": ind}
+        assumptions = notes + f2["assumptions"]
+        card = {"kind": "simulate"}
     elif intent == "have":
         incoming = {"insurance_payout": fc["expected_payout"], "payout_day": fc["payout_day"],
-                    "bridge_available": available_bridge(h),  # not yet taken (taken money is already in checking)
+                    "bridge_available": available_bridge(h),
                     "help_circle_received": sum(t.amount for t in h.help_circle)}
         facts = {"accounts": _accounts_view(h), "incoming": incoming}
         text = (f"You have ${h.accounts.checking + h.accounts.savings:,.0f} in checking and savings, a "
                 f"${h.accounts.cd:,.0f} CD and a ${h.accounts.ira:,.0f} IRA. About ${incoming['insurance_payout']:,.0f} "
-                f"should come from insurance around day {incoming['payout_day']}"
+                f"should come from insurance around {_date(incoming['payout_day'])}"
                 + (f", and ${incoming['bridge_available']:,.0f} in Bridge Funds is ready now." if incoming["bridge_available"] else "."))
+        card = {"kind": "picture"}
     elif intent == "where":
         ladder = money_ladder(h, s, fc)
         facts = {"ladder": ladder}
         use = [r["name"] for r in ladder if r["action"] in ("use", "ask") and r["available"] > 0][:2]
         text = ("Use money in this order: " + ", then ".join(use or ["checking and savings"])
                 + ". Keep the credit card for essentials, and protect your CD and IRA.")
+        card = {"kind": "ladder", "rows": [{"label": r["name"], "amount": f"${r['available']:,.0f}" if r["action"] != "protect" else "protected",
+                                            "use": r["action"] == "use"} for r in ladder]}
+    elif intent == "bills":
+        pending = [b for b in h.bills if b.status == "pending" and b.due_in_days <= fc["payout_day"]]
+        facts = {"bills": [b.model_dump() for b in pending]}
+        text = (f"{len(pending)} bills are due before the claim pays. Late fees are paused while Disaster Mode is on, "
+                "so pay the ones that protect your credit and move the rest.") if pending else "Nothing else is due before the claim pays."
     elif intent == "claim":
         c = claim_summary(h)
         facts = {k: c[k] for k in ("owed", "documented_pct", "status_line", "missing", "filed")}
         text = c["status_line"] + (f" Still missing: {c['missing'][0].lower()}." if c["missing"] else "")
-    elif intent == "what_if":
-        ind = indicators(h, s, fc)
-        facts = {"forecast": {k: fc[k] for k in ("payout_day", "tight_day", "min_balance_before_payout", "runway_days")},
-                 "indicators": ind}
-        text = (f"If the claim pays on day {fc['payout_day']}, your tightest day is day {fc['tight_day']} at "
-                f"${fc['min_balance_before_payout']:,.0f}. {ind['runway']['text']}")
     else:  # next
         facts = {"next_steps": steps}
-        text = "Here's what to do now: " + "; ".join(s_["title"] for s_ in steps) + "." if steps else "You're on track. Nothing urgent right now."
+        text = ("Here's what I'd do first: " + steps[0]["title"].rstrip(".") + ".") if steps else "You're on track. Nothing urgent right now."
 
     wording = await get_gemini().write(
         "Answer the family's question: " + question, {"draft_answer": text, "facts": facts}, fallback=text
@@ -155,5 +261,5 @@ async def ask(h: Household, question: str, s: Scenario | None = None) -> dict:
         tail = f" Next step: {next_step['title']}."
         text += tail
         wording = wording.rstrip() + tail
-    return {"intent": intent, "answer": wording, "draft": text, "facts": facts,
+    return {"intent": intent, "answer": wording, "draft": text, "facts": facts, "card": card,
             "assumptions": assumptions, "next_step": next_step, "next_steps": steps}

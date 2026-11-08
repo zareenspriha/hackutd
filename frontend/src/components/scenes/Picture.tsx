@@ -48,7 +48,8 @@ function liveView(d: LiveData) {
     kind: kind[r.action],
     note: r.text,
   }));
-  const spendable = (a("checking")?.amount ?? 0) + (a("savings")?.amount ?? 0);
+  // Same number the Money Ladder adds up, so the headline and the ladder always agree.
+  const spendable = d.ladder.filter((r) => r.action === "use").reduce((t, r) => t + r.available, 0);
   const onTheWay = d.forecast.expected_payout + bridgeLeft;
   return { have, owe, coming, ind, rungs, spendable, onTheWay };
 }
@@ -90,7 +91,7 @@ export default function Picture() {
           You can spend <span className="tnum">${Math.round(spendable).toLocaleString()}</span>
           <span className="text-dusty"> today.</span>
         </h1>
-        <p className="mt-3 text-lg text-dusty-deep">Without touching your CD or IRA. {usd(v.onTheWay)} more is on the way.</p>
+        <p className="mt-3 text-lg text-dusty-deep">After the bills due before the claim pays, without touching your CD or IRA. {usd(v.onTheWay)} more is on the way.</p>
       </Rise>
 
       <Rise delay={0.15} className="mt-8 inline-flex rounded-full border border-midnight/10 bg-cream-2/70 p-1.5" >

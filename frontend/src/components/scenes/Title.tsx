@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { ArrowRight, ChevronDown } from "lucide-react";
 import Logo from "../Logo";
 import { EASE, useNav, type SceneId } from "../ui";
+import { useLive } from "@/lib/live";
 
 /**
  * Landing site. Light, thin grid lines, oversized headline, a live phone mockup,
@@ -38,6 +39,8 @@ const menus: { key: string; label: string; to: SceneId; items: { t: string; d: s
 
 export default function Landing() {
   const { go } = useNav();
+  const { data } = useLive();
+  const bridgeText = data ? `$${Math.round(data.bridge.amount).toLocaleString("en-US")}` : "$2,480";
   const [open, setOpen] = useState<string | null>(null);
 
   useEffect(() => {
@@ -157,7 +160,7 @@ export default function Landing() {
         <div className="mx-auto grid max-w-[1240px] grid-cols-4 px-10">
           {[
             ["30 sec", "To scan a room"],
-            ["$2,480", "In hand in minutes"],
+            [bridgeText, "In hand in minutes"],
             ["0", "Late fees while you recover"],
             ["1", "Next step at a time"],
           ].map(([n, l], i) => (
@@ -262,7 +265,7 @@ function ArtFund() {
       <rect x="28" y="30" width="104" height="64" rx="10" fill="#1c2e4a" />
       <rect x="40" y="44" width="22" height="16" rx="3" fill="#bdc4d4" />
       <motion.text x="40" y="84" fontSize="14" fill="#f2f1ee" animate={{ opacity: [0.2, 1, 0.2] }} transition={{ duration: 1.6, repeat: Infinity }}>
-        $2,480
+        Bridge funds
       </motion.text>
       <motion.circle cx="118" cy="46" r="6" fill="#c99a4a" animate={{ scale: [1, 1.4, 1] }} transition={{ duration: 1.6, repeat: Infinity }} />
     </svg>

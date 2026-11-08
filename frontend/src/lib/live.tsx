@@ -54,6 +54,12 @@ export type LScanResult = {
   missing_areas: string[]; quality: { ok: boolean; warnings: string[] }; losses: LLoss[]; loss_total: number;
 };
 export type LHelp = { from_name: string; amount: number; note: string };
+export type LCard =
+  | { kind: "ladder"; rows: { label: string; amount: string; use: boolean }[] }
+  | { kind: "when"; now: string; later: string; date: string }
+  | { kind: "simulate" }
+  | { kind: "picture" };
+export type LCoach = { intent: string; answer: string; card: LCard | null; next_step: LNextStep | null; assumptions: string[] };
 
 export type LiveData = {
   home: LHome; accounts: LAccount[]; bills: LBill[]; health: LHealth; ladder: LRung[]; claim: LClaim;
@@ -119,7 +125,8 @@ type Live = {
   loading: boolean;
   refresh: () => Promise<void>;
   forecast: (s: Scenario) => Promise<LForecast | null>;
-  coach: (question: string) => Promise<{ answer: string; next_step: LNextStep | null; assumptions: string[] } | null>;
+  coach: (question: string) => Promise<LCoach | null>;
+  whatIf: (s: Scenario) => Promise<{ forecast: LForecast; next_steps: LNextStep[] } | null>;
   fileClaim: () => Promise<void>;
   addReceipt: (r: { merchant: string; category: "food" | "lodging" | "transport" | "other"; total: number; days_covered: number }) => Promise<LReceipt | null>;
   takeBridge: (amount?: number) => Promise<number | null>;
@@ -179,6 +186,14 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       if (!API) return null;
       try {
         return await req<LForecast>("GET", hh(`/forecast${scenarioQuery(s)}`));
+      } catch {
+        return null;
+      }
+    },
+    whatIf: async (s) => {
+      if (!API) return null;
+      try {
+        return await req("GET", hh(`/what-if${scenarioQuery(s)}`));
       } catch {
         return null;
       }
